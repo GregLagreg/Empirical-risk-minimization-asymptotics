@@ -28,7 +28,8 @@ from typing import Callable, Literal, Optional, Sequence, Tuple, Union, List
 
 import numpy as np
 
-Array = np.ndarray  
+Array = np.ndarray
+
 
 def exponential_covariance(n, rho=0.5):
     """
@@ -230,109 +231,6 @@ class BaseDataModel:
             # Print row
             print(f"{str(label_val):<6} | {emp_gamma:.3f} vs {theo_gamma_k:.3f} | {mu_diff:.5f}             | {cov_diff:.5f}")
 
-
-@dataclass
-class LinearFactorMixedModel(BaseDataModel):
-    """
-    Linear factor mixed model.
-
-    x = sum_{i=1}^q (s_i * y + e_i) v_i
-        + sum_{i=q+1}^p e_i v_i
-
-    where:
-      y ~ Bernoulli(P) mapped to {-1, +1}
-      e_i ~ N(0, noise_std^2)
-    """
-
-    p: int
-    q: int
-    P: float                     # P(y = +1)
-    s: Array                     # shape (q,)
-    noise_std: float = 1.0
-    basis: Optional[Array] = None  # shape (p, p), columns = v_i
-
-    def __post_init__(self):
-        if not (0 < self.P < 1):
-            raise ValueError("P must be in (0, 1)")
-
-        if self.q > self.p:
-            raise ValueError("q must be <= p")
-
-        self.s = np.asarray(self.s, dtype=float)
-        if self.s.shape != (self.q,):
-            raise ValueError(f"s must have shape ({self.q},)")
-
-        # Default basis: canonical basis
-        if self.basis is None:
-            self.basis = np.eye(self.p)
-        else:
-            self.basis = np.asarray(self.basis, dtype=float)
-            if self.basis.shape != (self.p, self.p):
-                raise ValueError("basis must have shape (p, p)")
-
-    @property
-    def num_classes(self) -> int:
-        return 2
-
-    def sample(self, n: int, rng: Optional[np.random.Generator] = None) -> Tuple[Array, Array]:
-        rng = np.random.default_rng() if rng is None else rng
-
-        # --- Sample y in {-1, +1} ---
-        y = rng.uniform(size=n) < self.P
-        y = np.where(y, 1.0, -1.0)
-
-        # --- Sample noise ---
-        E = self.noise_std * rng.standard_normal(size=(n, self.p))
-
-        # --- Signal contribution ---
-        X = E.copy()
-        X[:, :self.q] += y[:, None] * self.s[None, :]
-
-        # --- Rotate into basis ---
-        X = X @ self.basis.T
-
-        return X, y
-
-    def sample_class(self, class_index: int, n: int, rng: Optional[np.random.Generator] = None):
-        rng = np.random.default_rng() if rng is None else rng
-
-        y_val = 1.0 if class_index == 1 else -1.0
-        y = np.full(n, y_val)
-
-        E = self.noise_std * rng.standard_normal(size=(n, self.p))
-        X = E.copy()
-        X[:, :self.q] += y[:, None] * self.s[None, :]
-        X = X @ self.basis.T
-
-        return X, y
-
-    def class_params(self) -> dict:
-        """
-        Theoretical mean and covariance for validation.
-        """
-        # Means
-        mu_pos = np.zeros(self.p)
-        mu_neg = np.zeros(self.p)
-        mu_pos[:self.q] = self.s
-        mu_neg[:self.q] = -self.s
-
-        mu_pos = mu_pos @ self.basis.T
-        mu_neg = mu_neg @ self.basis.T
-
-        # Covariance (same for both classes)
-        cov = self.noise_std ** 2 * np.eye(self.p)
-
-        return dict(
-            p=self.p,
-            num_classes=2,
-            gamma=np.array([1 - self.P, self.P]),
-            mus=[mu_neg, mu_pos],
-            covs=[cov, cov],
-            y_values=[-1.0, 1.0],
-        )
- 
-
-
 @dataclass
 class TeacherStudentModel(BaseDataModel):
     """
@@ -439,14 +337,6 @@ class TeacherStudentModel(BaseDataModel):
             covs=[self.C_x.copy()],
             y_values=None,
         )
-
-
-from dataclasses import dataclass
-from typing import Optional, Tuple
-import numpy as np
-
-Array = np.ndarray
-
 
 
 @dataclass
@@ -613,6 +503,185 @@ class MixtureClassificationModel(BaseDataModel): # Inherit from BaseDataModel if
             sub_mode_deltas=[d.copy() for d in self.sub_mode_deltas],
             y_values=list(self.y_values),
         )
+    
+
+@dataclass
+class MixtureClassificationModelGaussian(BaseDataModel): # Inherit from BaseDataModel if available in your env
+    """
+    K-class mixture model for classification-like settings with optional bimodal features.
+
+    A class label y takes values y_values[k] with probability gamma[k].
+    Then x|y=y_values[k] is distributed as a mixture of two sub-modes:
+       0.5 * P(x | center = mu_k - delta_k/2) + 0.5 * P(x | center = mu_k + delta_k/2)
+
+    Parameters
+    ----------
+    p : int
+        Dimension of feature vector.
+    gamma : array-like shape (K,)
+        Class proportions.
+    mus : sequence of length K, each shape (p,)
+        The global center of each class.
+    covs : sequence of length K, each shape (p,p)
+        Covariance matrix for the sub-modes.
+    sub_mode_deltas : Optional[Sequence[Array]]
+        Sequence of length K, each shape (p,). 
+        Represents the vector difference between the two sub-modes for class k.
+        If None, defaults to zeros (unimodal).
+    y_values : sequence of length K
+        The actual label values (e.g., [0, 1] or [-1, 1]).
+    feature_dist : {"gaussian", "uniform_iid", "uniform_affine"}
+    """
+    p: int
+    gamma: Array
+    mus: Sequence[Array]
+    covs: Sequence[Array]
+    sub_mode_deltas: Optional[Sequence[Array]] = None
+    y_values: Optional[Sequence[float]] = None
+    feature_dist: FeatureDistribution = "gaussian"
+
+    def __post_init__(self) -> None:
+        self.gamma = np.asarray(self.gamma, dtype=float).reshape(-1)
+        if self.gamma.ndim != 1 or self.gamma.shape[0] < 1:
+            raise ValueError("gamma must be a 1D array with length K>=1")
+        K = self.gamma.shape[0]
+        if np.any(self.gamma < 0):
+            raise ValueError("gamma must be nonnegative")
+        s = float(np.sum(self.gamma))
+        if not np.isfinite(s) or s <= 0:
+            raise ValueError("gamma must sum to a positive finite number")
+        # Normalize for safety
+        self.gamma = self.gamma / s
+
+        if len(self.mus) != K or len(self.covs) != K:
+            raise ValueError("mus and covs must have length K=len(gamma)")
+        
+        self.mus = [_as_1d(mu, self.p, f"mu[{k}]") for k, mu in enumerate(self.mus)]
+        self.covs = [_as_2d(C, self.p, f"C[{k}]") for k, C in enumerate(self.covs)]
+
+        # --- NEW: Handle sub_mode_deltas ---
+        if self.sub_mode_deltas is None:
+            # Default to no separation (unimodal)
+            self.sub_mode_deltas = [np.zeros(self.p) for _ in range(K)]
+        else:
+            if len(self.sub_mode_deltas) != K:
+                raise ValueError("sub_mode_deltas must have length K=len(gamma)")
+            self.sub_mode_deltas = [_as_1d(d, self.p, f"delta[{k}]") for k, d in enumerate(self.sub_mode_deltas)]
+        # -----------------------------------
+
+        if self.y_values is None:
+            # Default: integer labels 0..K-1
+            self.y_values = list(range(K))
+        if len(self.y_values) != K:
+            raise ValueError("y_values must have length K=len(gamma)")
+        self.y_values = [float(v) for v in self.y_values]
+
+        # For uniform_iid, fall back to uniform_affine if any covariance is not diagonal.
+        if self.feature_dist == "uniform_iid":
+            if any(not _is_diagonal(C) for C in self.covs):
+                self.feature_dist = "uniform_affine"
+
+    @property
+    def num_classes(self) -> int:
+        return int(self.gamma.shape[0])
+
+    def _sample_from_dist(self, n: int, mu: Array, C: Array, rng: np.random.Generator) -> Array:
+        """Helper to sample from the specific base distribution."""
+        if n == 0:
+            return np.zeros((0, self.p))
+            
+        if self.feature_dist == "gaussian":
+            return sample_gaussian(n, mu, C, rng)
+        elif self.feature_dist == "uniform_iid":
+            var = np.diag(C)
+            return sample_uniform_iid_from_mean_var(n, mu, var, rng)
+        elif self.feature_dist == "uniform_affine":
+            return sample_uniform_affine(n, mu, C, rng)
+        else:
+            raise ValueError(f"Unknown feature_dist={self.feature_dist}")
+
+    def _sample_x_k(self, k: int, n: int, rng: np.random.Generator) -> Array:
+        mu_center = self.mus[k]
+        delta = self.sub_mode_deltas[k]
+        C = self.covs[k]
+
+        # If delta is essentially zero, use standard unimodal sampling
+        if np.allclose(delta, 0):
+            return self._sample_from_dist(n, mu_center, C, rng)
+
+        # --- Bimodal Logic ---
+        # We split the n samples into two sub-modes with 50/50 probability
+        # 1. Assign each sample to mode 0 (left) or mode 1 (right)
+        mode_choices = rng.integers(0, 2, size=n) # 0 or 1
+        n_left = np.sum(mode_choices == 0)
+        n_right = n - n_left
+
+        # 2. Define centers for sub-modes
+        # Mode 1: mu - delta/2
+        # Mode 2: mu + delta/2
+        mu_left = mu_center - 0.5 * delta
+        mu_right = mu_center + 0.5 * delta
+
+        # 3. Sample
+        X_left = self._sample_from_dist(n_left, mu_left, C, rng)
+        X_right = self._sample_from_dist(n_right, mu_right, C, rng)
+
+        # 4. Combine preserving random order
+        X = np.empty((n, self.p), dtype=float)
+        X[mode_choices == 0] = X_left
+        X[mode_choices == 1] = X_right
+        # --- NEW: Gaussian replacement with same empirical statistics ---
+        # Compute empirical mean and covariance of the sampled X
+        if X.shape[0] <= 1: 
+            X_gauss = X
+        else:
+            # print(X.shape)
+            empirical_mu = np.mean(X, axis=0)
+            empirical_C = np.cov(X, rowvar=False)
+            # print(empirical_C.shape)
+
+            # Sample Gaussian with the same statistics
+            X_gauss = rng.multivariate_normal(empirical_mu, empirical_C, size=n)
+        
+        return X_gauss
+
+    def sample_class(
+        self, class_index: int, n: int, rng: Optional[np.random.Generator] = None
+    ) -> Tuple[Array, Array]:
+        rng = np.random.default_rng() if rng is None else rng
+        k = int(class_index)
+        if k < 0 or k >= self.num_classes:
+            raise ValueError(f"class_index must be in [0, K-1], got {k}")
+        X = self._sample_x_k(k, n, rng)
+        y = np.full(shape=(n,), fill_value=self.y_values[k], dtype=float)
+        return X, y
+
+    def sample(self, n: int, rng: Optional[np.random.Generator] = None) -> Tuple[Array, Array]:
+        rng = np.random.default_rng() if rng is None else rng
+        K = self.num_classes
+        class_idx = rng.choice(K, size=n, p=self.gamma)
+        X = np.zeros((n, self.p), dtype=float)
+        y = np.zeros(n, dtype=float)
+        for k in range(K):
+            mask = class_idx == k
+            nk = int(np.sum(mask))
+            if nk == 0:
+                continue
+            X[mask] = self._sample_x_k(k, nk, rng)
+            y[mask] = self.y_values[k]
+        return X, y
+
+    def class_params(self) -> dict:
+        return dict(
+            p=self.p,
+            num_classes=self.num_classes,
+            gamma=self.gamma.copy(),
+            mus=[m.copy() for m in self.mus],
+            covs=[C.copy() for C in self.covs],
+            sub_mode_deltas=[d.copy() for d in self.sub_mode_deltas],
+            y_values=list(self.y_values),
+        )
+
 
 
 
@@ -790,6 +859,575 @@ class MNISTDataModel(BaseDataModel): # Inherit from BaseDataModel if needed
         idx = rng.choice(Xf.shape[0], size=int(n), replace=bool(self.replace))
         return Xf[idx], yf[idx]
     
+    def _add_noise(self, X: Array, rng: np.random.Generator) -> Array:
+        """Add Gaussian noise if noise_std > 0."""
+        if self.noise_std > 0:
+            return X + rng.normal(scale=self.noise_std, size=X.shape).astype(self.dtype)
+        return X
+    
+
+@dataclass
+class MNISTMergedDataModel(BaseDataModel):
+    """
+    Modified MNIST data model with bi-modal classes (two digits per class).
+    
+    Parameters
+    ----------
+    data_path: str
+        Local .npz file containing MNIST arrays.
+    noise_std: float
+        Standard deviation of Gaussian noise added to the FINAL representation.
+    representation: Literal["raw", "random_features"] = "raw"
+    ...
+    """
+
+    data_path: str
+    split: Literal["train", "test", "full"] = "test"
+    stats_split: Literal["train", "test", "full"] = "train"
+    representation: Literal["raw", "random_features"] = "raw"
+    noise_std: float = 0.0
+    pixel_scaling: Literal["uint8", "unit_interval"] = "unit_interval"
+    dtype: Any = np.float32
+    cov_kind: Literal["full", "diag"] = "full"
+    cov_reg: float = 1e-6
+    classes: Optional[Sequence[int]] = None  # Should be 0 and 1 as we are using bi-modal classification
+    task: Literal["multiclass", "binary"] = "multiclass"
+    positive_classes: Optional[Sequence[int]] = None
+    replace: bool = True
+    W: Optional[Array] = None
+    bias: Optional[Array] = None
+    activation: Literal["identity", "relu", "tanh", "cos", "sign_pm1"] = "identity"
+    feature_scale: float = 1.0
+    p_raw: int = field(init=False)
+    p: int = field(init=False)
+    _X_train: Array = field(init=False, repr=False)
+    _y_train: Array = field(init=False, repr=False)
+    _X_test: Array = field(init=False, repr=False)
+    _y_test: Array = field(init=False, repr=False)
+    _class_labels: Array = field(init=False, repr=False)
+    _label_map: Dict[int, int] = field(init=False, repr=False)
+    _cached_params_raw: Optional[Dict[str, Any]] = field(default=None, init=False, repr=False)
+    _cached_params_rf: Optional[Dict[str, Any]] = field(default=None, init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        # Load data
+        x_train, y_train, x_test, y_test = _load_mnist_npz(self.data_path)
+
+        Xtr = _as_2d_flattened_uint8(x_train)
+        Xte = _as_2d_flattened_uint8(x_test)
+
+        self._X_train = _normalize_pixels(Xtr, self.pixel_scaling, np.dtype(self.dtype))
+        self._y_train = np.asarray(y_train, dtype=int)
+
+        self._X_test = _normalize_pixels(Xte, self.pixel_scaling, np.dtype(self.dtype))
+        self._y_test = np.asarray(y_test, dtype=int)
+
+        self.p_raw = int(self._X_train.shape[1])
+
+        # Define classes as two-digit classes: class 0 is [3, 6], class 1 is [4, 7]
+        if self.classes is None:
+            self._class_labels = np.array([0, 1], dtype=int)  # Two classes: 0 and 1
+        else:
+            self._class_labels = np.asarray(self.classes, dtype=int)
+            if self._class_labels.ndim != 1 or self._class_labels.size != 2:
+                raise ValueError("For bi-modal classification, `classes` must contain exactly two classes.")
+        
+        # Map the two class labels to their respective digit pairs
+        self._label_map = {
+            0: [3, 6],  # Class 0: randomly sample from 3 and 6
+            1: [4, 7],  # Class 1: randomly sample from 4 and 7
+        }
+
+        # Check task configuration for binary task (only two classes)
+        if self.task == "binary":
+            if self.positive_classes is None or len(self.positive_classes) == 0:
+                raise ValueError("For task='binary', you must provide positive_classes.")
+            pos = set(int(d) for d in self.positive_classes)
+            if not pos.issubset({0, 1}):  # Must be either class 0 or class 1
+                raise ValueError("positive_classes must be either 0 or 1.")
+            if self.classes is not None:
+                kept_set = set(self._class_labels.tolist())
+                if len(pos.intersection(kept_set)) == 0:
+                    raise ValueError(
+                        "Binary task: none of positive_classes are included in `classes`."
+                    )
+
+        # Set output dimension p
+        if self.representation == "raw":
+            self.p = self.p_raw
+        else:
+            if self.W is None:
+                raise ValueError("representation='random_features' requires providing W.")
+            W = np.asarray(self.W)
+            if W.ndim != 2 or W.shape[1] != self.p_raw:
+                raise ValueError(
+                    f"W must have shape (m, p_raw) = (m, {self.p_raw}), got {W.shape}."
+                )
+            m = int(W.shape[0])
+            if self.bias is not None:
+                b = np.asarray(self.bias)
+                if b.shape not in [(m,), (1, m)]:
+                    raise ValueError(f"bias must have shape ({m},) (or (1,{m})), got {b.shape}")
+            self.p = m
+
+    @property
+    def num_classes(self) -> int:
+        # For binary classification, we have two classes (class 0 and class 1)
+        return 2
+
+    def _get_split(self, split: Literal["train", "test", "full"]) -> Tuple[Array, Array]:
+        if split == "train":
+            return self._X_train, self._y_train
+        if split == "test":
+            return self._X_test, self._y_test
+        if split == "full":
+            X = np.concatenate([self._X_train, self._X_test], axis=0)
+            y = np.concatenate([self._y_train, self._y_test], axis=0)
+            return X, y
+        raise ValueError(f"Unknown split={split!r}")
+
+    def _filter_and_encode_labels(self, X: Array, y_digits: Array) -> Tuple[Array, Array]:
+        """Filter and map the labels to the corresponding class digits."""
+        if self.task == "binary":
+            pos = set(int(d) for d in self.positive_classes or [])
+            if self.classes is not None:
+                kept_set = set(self._class_labels.tolist())
+                mask = np.array([int(yy) in kept_set for yy in y_digits], dtype=bool)
+                X = X[mask]
+                y_digits = y_digits[mask]
+            y = np.where(np.isin(y_digits, list(pos)), 1.0, -1.0).astype(self.dtype, copy=False)
+            return X, y
+
+        if self.classes is None:
+            y_idx = y_digits.astype(int, copy=False)
+            return X, y_idx
+
+        # Use the label map to randomly select between two digits per class
+        mask = np.isin(y_digits, self._class_labels)
+        Xf = X[mask]
+        yf = y_digits[mask].astype(int, copy=False)
+
+        # Map class labels to their respective two-digit pairs
+        y_idx = np.array([np.random.choice(self._label_map[yy]) for yy in yf], dtype=int)
+        return Xf, y_idx
+
+    def _sample_raw_clean(self, n: int, rng: np.random.Generator) -> Tuple[Array, Array]:
+        """Internal: fetch 'n' clean raw pixel vectors and labels."""
+        X_all, y_all_digits = self._get_split(self.split)
+        Xf, yf = self._filter_and_encode_labels(X_all, y_all_digits)
+
+        if Xf.shape[0] == 0:
+            raise ValueError("No samples available after filtering.")
+
+        idx = rng.choice(Xf.shape[0], size=int(n), replace=bool(self.replace))
+        return Xf[idx], yf[idx]
+
+    def _add_noise(self, X: Array, rng: np.random.Generator) -> Array:
+        """Add Gaussian noise if noise_std > 0."""
+        if self.noise_std > 0:
+            return X + rng.normal(scale=self.noise_std, size=X.shape).astype(self.dtype)
+        return X
+
+    # -----------------------------
+    # Transform
+    # -----------------------------
+    def transform(self, X_raw: Array) -> Array:
+        if self.W is None:
+            raise ValueError("transform() requires W to be provided.")
+        W = np.asarray(self.W, dtype=self.dtype)
+        Z = X_raw @ W.T
+        if self.bias is not None:
+            b = np.asarray(self.bias, dtype=self.dtype).reshape(-1)
+            Z = Z + b
+        act = _get_activation(self.activation)
+        Phi = act(Z)
+        if self.feature_scale != 1.0:
+            Phi = Phi * self.dtype.type(self.feature_scale)
+        return Phi.astype(self.dtype, copy=False)
+
+    # -----------------------------
+    # Sampling API
+    # -----------------------------
+    def sample_raw(self, n: int, rng: Optional[np.random.Generator] = None) -> Tuple[Array, Array]:
+        """
+        Returns raw pixel vectors.
+        Adds noise ONLY if representation="raw".
+        """
+        rng = np.random.default_rng() if rng is None else rng
+        X, y = self._sample_raw_clean(n, rng)
+        
+        # We only add noise here if the target representation IS raw.
+        # If user calls sample_raw() while representation="random_features", 
+        # we return CLEAN pixels so they can be transformed correctly later.
+        if self.representation == "raw":
+            X = self._add_noise(X, rng)
+            
+        return X, y
+
+    def sample_features(
+        self, n: int, rng: Optional[np.random.Generator] = None
+    ) -> Tuple[Array, Array]:
+        """
+        Returns random features.
+        Adds noise ONLY if representation="random_features".
+        """
+        rng = np.random.default_rng() if rng is None else rng
+        # Always get clean pixels first
+        X_raw, y = self._sample_raw_clean(n, rng)
+        # Transform clean pixels
+        Phi = self.transform(X_raw)
+        
+        # Add noise if this is the active representation
+        if self.representation == "random_features":
+            Phi = self._add_noise(Phi, rng)
+            
+        return Phi, y
+
+    def sample_both(
+        self, n: int, rng: Optional[np.random.Generator] = None
+    ) -> Tuple[Array, Array, Array]:
+        """
+        Returns (X_raw, Phi, y).
+        Applies noise to whichever component is the active representation.
+        """
+        rng = np.random.default_rng() if rng is None else rng
+        X_raw, y = self._sample_raw_clean(n, rng)
+        
+        Phi = None
+        if self.W is not None:
+            Phi = self.transform(X_raw)
+        
+        if self.representation == "raw":
+            X_raw = self._add_noise(X_raw, rng)
+        elif self.representation == "random_features" and Phi is not None:
+            Phi = self._add_noise(Phi, rng)
+            
+        if Phi is None and self.representation == "random_features":
+             raise ValueError("sample_both() requires W.")
+
+        return X_raw, Phi, y
+
+    def sample(self, n: int, rng: Optional[np.random.Generator] = None) -> Tuple[Array, Array]:
+        if self.representation == "raw":
+            return self.sample_raw(n, rng=rng)
+        return self.sample_features(n, rng=rng)
+
+    def sample_class(
+        self, class_index: int, n: int, rng: Optional[np.random.Generator] = None
+    ) -> Tuple[Array, Array]:
+        rng = np.random.default_rng() if rng is None else rng
+        X_all, y_all_digits = self._get_split(self.split)
+
+        # ... (filtering logic same as before, condensed for brevity) ...
+        if self.task == "binary":
+            if class_index not in (0, 1):
+                raise ValueError("binary task expects class_index in {0,1}.")
+            pos = set(int(d) for d in self.positive_classes or [])
+            y_sign = np.where(np.isin(y_all_digits, list(pos)), 1, -1)
+            
+            if self.classes is not None:
+                kept_set = set(int(d) for d in self._class_labels.tolist())
+                keep_mask = np.isin(y_all_digits, list(kept_set))
+            else:
+                keep_mask = np.ones_like(y_all_digits, dtype=bool)
+
+            desired = 1 if class_index == 1 else -1
+            mask = keep_mask & (y_sign == desired)
+            Xc = X_all[mask]
+            yc = y_sign[mask].astype(self.dtype, copy=False)
+        else:
+            K = self.num_classes
+            if not (0 <= class_index < K):
+                raise ValueError(f"class_index out of range: {class_index}")
+            digit = int(self._class_labels[class_index]) if self.classes is not None else class_index
+            mask = (y_all_digits == digit)
+            Xc = X_all[mask]
+            yc = np.full(Xc.shape[0], class_index, dtype=int)
+
+        if Xc.shape[0] == 0:
+            raise ValueError(f"No samples for class {class_index}.")
+
+        # Sampling with replacement
+        idx = rng.choice(Xc.shape[0], size=int(n), replace=bool(self.replace))
+        X_batch = Xc[idx]
+        y_batch = yc[idx]
+
+        # Apply transforms and noise based on representation
+        if self.representation == "raw":
+            return self._add_noise(X_batch, rng), y_batch
+        else:
+            Phi_batch = self.transform(X_batch)
+            return self._add_noise(Phi_batch, rng), y_batch
+
+    # -----------------------------
+    # Moment / parameter estimation
+    # -----------------------------
+    def _compute_class_params_for_representation(
+        self, representation: Literal["raw", "random_features"]
+    ) -> Dict[str, Any]:
+        """
+        Estimate mixture moments on stats_split.
+        Adjusts Covariances to account for added noise_std.
+        """
+        X_all, y_all_digits = self._get_split(self.stats_split)
+        Xf, yf = self._filter_and_encode_labels(X_all, y_all_digits)
+
+        if Xf.shape[0] == 0:
+            raise ValueError("No stats samples available.")
+
+        # Logic to iterate classes (Binary vs Multiclass)
+        # Note: Code structure matches previous, just extracting loop body for brevity
+        if self.task == "binary":
+            masks = [yf < 0, yf > 0] # class 0 (-1), class 1 (+1)
+            y_vals = np.asarray([-1.0, 1.0], dtype=self.dtype)
+        else:
+            masks = [(yf == k) for k in range(self.num_classes)]
+            y_vals = self.classes if self.classes is not None else list(range(self.num_classes))
+
+        gamma = []
+        mus = []
+        covs = []
+
+        total_samples = float(Xf.shape[0])
+
+        for mask in masks:
+            nk = int(mask.sum())
+            gamma.append(float(nk) / total_samples if total_samples > 0 else 0.0)
+
+            if nk == 0:
+                dim = self.p_raw if representation == "raw" else self.p
+                mus.append(np.zeros(dim, dtype=self.dtype))
+                # Base regularization
+                covs.append(self.cov_reg * np.eye(dim, dtype=self.dtype))
+                continue
+
+            Xc_raw = Xf[mask]
+            Xc = Xc_raw if representation == "raw" else self.transform(Xc_raw)
+
+            # 1. Estimate Empirical Moments (on clean data)
+            if self.cov_kind == "full":
+                mu, C = _moment_estimates_full(Xc, reg=self.cov_reg)
+            else:
+                mu, C = _moment_estimates_diag(Xc, reg=self.cov_reg)
+
+            # 2. Add Noise Variance (Theory Correction)
+            # If the sampling adds noise N(0, noise_std^2 * I), the covariance
+            # of the output is Sigma_clean + noise_std^2 * I.
+            # We only apply this if we are computing params for the active representation
+            # OR if we assume noise_std applies to the requested representation context.
+            # Here we apply it if noise_std > 0.
+            if self.noise_std > 0:
+                noise_var = self.noise_std ** 2
+                if self.cov_kind == "diag":
+                    # C is diagonal matrix (or vector depending on implementation, 
+                    # but _moment_estimates_diag returns matrix here)
+                    # We add to diagonal elements.
+                    np.fill_diagonal(C, C.diagonal() + noise_var)
+                else:
+                    # Full covariance
+                    C += noise_var * np.eye(C.shape[0], dtype=C.dtype)
+
+            mus.append(mu)
+            covs.append(C)
+
+        return dict(
+            p=int(mus[0].shape[0]),
+            num_classes=len(gamma),
+            gamma=np.array(gamma, dtype=self.dtype),
+            mus=mus,
+            covs=covs,
+            y_values=y_vals,
+            stats_split=self.stats_split,
+            representation=representation,
+        )
+
+    def class_params_raw(self) -> Dict[str, Any]:
+        if self._cached_params_raw is None:
+            self._cached_params_raw = self._compute_class_params_for_representation("raw")
+        return self._cached_params_raw
+
+    def class_params_features(self) -> Dict[str, Any]:
+        if self.W is None:
+            raise ValueError("class_params_features() requires W.")
+        if self._cached_params_rf is None:
+            self._cached_params_rf = self._compute_class_params_for_representation("random_features")
+        return self._cached_params_rf
+
+    def class_params(self) -> Dict[str, Any]:
+        if self.representation == "raw":
+            return self.class_params_raw()
+        return self.class_params_features()
+
+
+@dataclass
+class MNISTMergedDataModelGaussian(BaseDataModel):
+    """
+    Modified MNIST data model with bi-modal classes (two digits per class).
+    
+    Parameters
+    ----------
+    data_path: str
+        Local .npz file containing MNIST arrays.
+    noise_std: float
+        Standard deviation of Gaussian noise added to the FINAL representation.
+    representation: Literal["raw", "random_features"] = "raw"
+    ...
+    """
+
+    data_path: str
+    split: Literal["train", "test", "full"] = "test"
+    stats_split: Literal["train", "test", "full"] = "train"
+    representation: Literal["raw", "random_features"] = "raw"
+    noise_std: float = 0.0
+    pixel_scaling: Literal["uint8", "unit_interval"] = "unit_interval"
+    dtype: Any = np.float32
+    cov_kind: Literal["full", "diag"] = "full"
+    cov_reg: float = 1e-6
+    classes: Optional[Sequence[int]] = None  # Should be 0 and 1 as we are using bi-modal classification
+    task: Literal["multiclass", "binary"] = "multiclass"
+    positive_classes: Optional[Sequence[int]] = None
+    replace: bool = True
+    W: Optional[Array] = None
+    bias: Optional[Array] = None
+    activation: Literal["identity", "relu", "tanh", "cos", "sign_pm1"] = "identity"
+    feature_scale: float = 1.0
+    p_raw: int = field(init=False)
+    p: int = field(init=False)
+    _X_train: Array = field(init=False, repr=False)
+    _y_train: Array = field(init=False, repr=False)
+    _X_test: Array = field(init=False, repr=False)
+    _y_test: Array = field(init=False, repr=False)
+    _class_labels: Array = field(init=False, repr=False)
+    _label_map: Dict[int, int] = field(init=False, repr=False)
+    _cached_params_raw: Optional[Dict[str, Any]] = field(default=None, init=False, repr=False)
+    _cached_params_rf: Optional[Dict[str, Any]] = field(default=None, init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        # Load data
+        x_train, y_train, x_test, y_test = _load_mnist_npz(self.data_path)
+
+        Xtr = _as_2d_flattened_uint8(x_train)
+        Xte = _as_2d_flattened_uint8(x_test)
+
+        self._X_train = _normalize_pixels(Xtr, self.pixel_scaling, np.dtype(self.dtype))
+        self._y_train = np.asarray(y_train, dtype=int)
+
+        self._X_test = _normalize_pixels(Xte, self.pixel_scaling, np.dtype(self.dtype))
+        self._y_test = np.asarray(y_test, dtype=int)
+
+        self.p_raw = int(self._X_train.shape[1])
+
+        # Define classes as two-digit classes: class 0 is [3, 6], class 1 is [4, 7]
+        if self.classes is None:
+            self._class_labels = np.array([0, 1], dtype=int)  # Two classes: 0 and 1
+        else:
+            self._class_labels = np.asarray(self.classes, dtype=int)
+            if self._class_labels.ndim != 1 or self._class_labels.size != 2:
+                raise ValueError("For bi-modal classification, `classes` must contain exactly two classes.")
+        
+        # Map the two class labels to their respective digit pairs
+        self._label_map = {
+            0: [3, 6],  # Class 0: randomly sample from 3 and 6
+            1: [4, 7],  # Class 1: randomly sample from 4 and 7
+        }
+
+        # Check task configuration for binary task (only two classes)
+        if self.task == "binary":
+            if self.positive_classes is None or len(self.positive_classes) == 0:
+                raise ValueError("For task='binary', you must provide positive_classes.")
+            pos = set(int(d) for d in self.positive_classes)
+            if not pos.issubset({0, 1}):  # Must be either class 0 or class 1
+                raise ValueError("positive_classes must be either 0 or 1.")
+            if self.classes is not None:
+                kept_set = set(self._class_labels.tolist())
+                if len(pos.intersection(kept_set)) == 0:
+                    raise ValueError(
+                        "Binary task: none of positive_classes are included in `classes`."
+                    )
+
+        # Set output dimension p
+        if self.representation == "raw":
+            self.p = self.p_raw
+        else:
+            if self.W is None:
+                raise ValueError("representation='random_features' requires providing W.")
+            W = np.asarray(self.W)
+            if W.ndim != 2 or W.shape[1] != self.p_raw:
+                raise ValueError(
+                    f"W must have shape (m, p_raw) = (m, {self.p_raw}), got {W.shape}."
+                )
+            m = int(W.shape[0])
+            if self.bias is not None:
+                b = np.asarray(self.bias)
+                if b.shape not in [(m,), (1, m)]:
+                    raise ValueError(f"bias must have shape ({m},) (or (1,{m})), got {b.shape}")
+            self.p = m
+
+    @property
+    def num_classes(self) -> int:
+        # For binary classification, we have two classes (class 0 and class 1)
+        return 2
+
+    def _get_split(self, split: Literal["train", "test", "full"]) -> Tuple[Array, Array]:
+        if split == "train":
+            return self._X_train, self._y_train
+        if split == "test":
+            return self._X_test, self._y_test
+        if split == "full":
+            X = np.concatenate([self._X_train, self._X_test], axis=0)
+            y = np.concatenate([self._y_train, self._y_test], axis=0)
+            return X, y
+        raise ValueError(f"Unknown split={split!r}")
+
+    def _filter_and_encode_labels(self, X: Array, y_digits: Array) -> Tuple[Array, Array]:
+        """Filter and map the labels to the corresponding class digits."""
+        if self.task == "binary":
+            pos = set(int(d) for d in self.positive_classes or [])
+            if self.classes is not None:
+                kept_set = set(self._class_labels.tolist())
+                mask = np.array([int(yy) in kept_set for yy in y_digits], dtype=bool)
+                X = X[mask]
+                y_digits = y_digits[mask]
+            y = np.where(np.isin(y_digits, list(pos)), 1.0, -1.0).astype(self.dtype, copy=False)
+            return X, y
+
+        if self.classes is None:
+            y_idx = y_digits.astype(int, copy=False)
+            return X, y_idx
+
+        # Use the label map to randomly select between two digits per class
+        mask = np.isin(y_digits, self._class_labels)
+        Xf = X[mask]
+        yf = y_digits[mask].astype(int, copy=False)
+
+        # Map class labels to their respective two-digit pairs
+        y_idx = np.array([np.random.choice(self._label_map[yy]) for yy in yf], dtype=int)
+        return Xf, y_idx
+
+    def _sample_raw_clean(self, n: int, rng: np.random.Generator, use_gaussian: bool = True) -> Tuple[Array, Array]:
+        """Internal: fetch 'n' clean raw pixel vectors and labels, optionally replace with Gaussian."""
+        X_all, y_all_digits = self._get_split(self.split)
+        Xf, yf = self._filter_and_encode_labels(X_all, y_all_digits)
+
+        if Xf.shape[0] == 0:
+            raise ValueError("No samples available after filtering.")
+
+        # Choose the samples
+        idx = rng.choice(Xf.shape[0], size=int(n), replace=bool(self.replace))
+        X = Xf[idx]
+        y = yf[idx]
+
+        # --- NEW: Replace with Gaussian if requested ---
+        if use_gaussian:
+            # Compute empirical mean and covariance
+            empirical_mu = np.mean(X, axis=0)
+            empirical_C = np.cov(X, rowvar=False)
+
+            # Sample Gaussian with the same statistics
+            X = rng.multivariate_normal(empirical_mu, empirical_C, size=n)
+
+        return X, y
+
     def _add_noise(self, X: Array, rng: np.random.Generator) -> Array:
         """Add Gaussian noise if noise_std > 0."""
         if self.noise_std > 0:
