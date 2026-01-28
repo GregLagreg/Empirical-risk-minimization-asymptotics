@@ -1,2 +1,2 @@
 # Empirical-risk-minimization-asymptotics
-Set of scripts to define statistical models, losses and solve Empirical risk minimization problem both empirically and theoretically.
+A collection of scripts for defining statistical models and loss functions, and for solving Empirical Risk Minimization (ERM) problems both empirically and theoretically. This repository accompanies a submission to ICML 2026, enabling the reproduction of experiments and testing of new configurations.
