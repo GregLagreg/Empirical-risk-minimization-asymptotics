@@ -396,8 +396,11 @@ class TheoryFixedPointSolver:
 
         # Predicted generalization loss
         pred_loss = 0.0
+        pred_loss_gauss = 0.0
         for k in range(K):
-            pred_loss += self.gamma[k] * self._expected_loss_for_class(k, mu=mu, alpha_k=alpha[k])
+            first, second = self._expected_loss_for_class(k, mu=mu, alpha_k=alpha[k])
+            pred_loss += self.gamma[k] * first
+            pred_loss_gauss += self.gamma[k] * second
 
         return dict(
             mu_star=mu,
@@ -406,6 +409,7 @@ class TheoryFixedPointSolver:
             nu=nu,
             Q=Q,
             predicted_loss=float(pred_loss),
+            predicted_loss_gauss=float(pred_loss_gauss),
             converged=converged,
             num_iter=it + 1,
             damping_final = d_it,
