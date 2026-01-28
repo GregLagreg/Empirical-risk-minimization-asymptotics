@@ -28,8 +28,7 @@ from typing import Callable, Literal, Optional, Sequence, Tuple, Union, List
 
 import numpy as np
 
-Array = np.ndarray
-
+Array = np.ndarray  
 
 def exponential_covariance(n, rho=0.5):
     """
@@ -231,6 +230,109 @@ class BaseDataModel:
             # Print row
             print(f"{str(label_val):<6} | {emp_gamma:.3f} vs {theo_gamma_k:.3f} | {mu_diff:.5f}             | {cov_diff:.5f}")
 
+
+@dataclass
+class LinearFactorMixedModel(BaseDataModel):
+    """
+    Linear factor mixed model.
+
+    x = sum_{i=1}^q (s_i * y + e_i) v_i
+        + sum_{i=q+1}^p e_i v_i
+
+    where:
+      y ~ Bernoulli(P) mapped to {-1, +1}
+      e_i ~ N(0, noise_std^2)
+    """
+
+    p: int
+    q: int
+    P: float                     # P(y = +1)
+    s: Array                     # shape (q,)
+    noise_std: float = 1.0
+    basis: Optional[Array] = None  # shape (p, p), columns = v_i
+
+    def __post_init__(self):
+        if not (0 < self.P < 1):
+            raise ValueError("P must be in (0, 1)")
+
+        if self.q > self.p:
+            raise ValueError("q must be <= p")
+
+        self.s = np.asarray(self.s, dtype=float)
+        if self.s.shape != (self.q,):
+            raise ValueError(f"s must have shape ({self.q},)")
+
+        # Default basis: canonical basis
+        if self.basis is None:
+            self.basis = np.eye(self.p)
+        else:
+            self.basis = np.asarray(self.basis, dtype=float)
+            if self.basis.shape != (self.p, self.p):
+                raise ValueError("basis must have shape (p, p)")
+
+    @property
+    def num_classes(self) -> int:
+        return 2
+
+    def sample(self, n: int, rng: Optional[np.random.Generator] = None) -> Tuple[Array, Array]:
+        rng = np.random.default_rng() if rng is None else rng
+
+        # --- Sample y in {-1, +1} ---
+        y = rng.uniform(size=n) < self.P
+        y = np.where(y, 1.0, -1.0)
+
+        # --- Sample noise ---
+        E = self.noise_std * rng.standard_normal(size=(n, self.p))
+
+        # --- Signal contribution ---
+        X = E.copy()
+        X[:, :self.q] += y[:, None] * self.s[None, :]
+
+        # --- Rotate into basis ---
+        X = X @ self.basis.T
+
+        return X, y
+
+    def sample_class(self, class_index: int, n: int, rng: Optional[np.random.Generator] = None):
+        rng = np.random.default_rng() if rng is None else rng
+
+        y_val = 1.0 if class_index == 1 else -1.0
+        y = np.full(n, y_val)
+
+        E = self.noise_std * rng.standard_normal(size=(n, self.p))
+        X = E.copy()
+        X[:, :self.q] += y[:, None] * self.s[None, :]
+        X = X @ self.basis.T
+
+        return X, y
+
+    def class_params(self) -> dict:
+        """
+        Theoretical mean and covariance for validation.
+        """
+        # Means
+        mu_pos = np.zeros(self.p)
+        mu_neg = np.zeros(self.p)
+        mu_pos[:self.q] = self.s
+        mu_neg[:self.q] = -self.s
+
+        mu_pos = mu_pos @ self.basis.T
+        mu_neg = mu_neg @ self.basis.T
+
+        # Covariance (same for both classes)
+        cov = self.noise_std ** 2 * np.eye(self.p)
+
+        return dict(
+            p=self.p,
+            num_classes=2,
+            gamma=np.array([1 - self.P, self.P]),
+            mus=[mu_neg, mu_pos],
+            covs=[cov, cov],
+            y_values=[-1.0, 1.0],
+        )
+ 
+
+
 @dataclass
 class TeacherStudentModel(BaseDataModel):
     """
@@ -337,6 +439,14 @@ class TeacherStudentModel(BaseDataModel):
             covs=[self.C_x.copy()],
             y_values=None,
         )
+
+
+from dataclasses import dataclass
+from typing import Optional, Tuple
+import numpy as np
+
+Array = np.ndarray
+
 
 
 @dataclass
