@@ -331,7 +331,184 @@ class LinearFactorMixedModel(BaseDataModel):
             covs=[cov, cov],
             y_values=[-1.0, 1.0],
         )
-      
+from dataclasses import dataclass
+from typing import Literal, Optional, Sequence, Tuple
+import numpy as np
+
+Array = np.ndarray
+
+
+@dataclass
+# class TeacherStudentModel(BaseDataModel):
+#     """
+#     Teacher/student model with a *bimodal* (two-mode) feature distribution.
+
+#     Generative model:
+#       mode m ~ Categorical(gamma) over {0,1}
+#       x | (m=k) ~ D_k with mean mu_k and covariance C_k
+#       y generated from x via a teacher mechanism (same teacher for both modes)
+
+#     Feature sampling options (for each mode):
+#       - "gaussian": x_k ~ N(mu_k, C_k)
+#       - "uniform_iid": independent Uniform coords matching mu_k and diag(C_k)
+#       - "uniform_affine": affine-uniform matching full C_k (not independent)
+
+#     Teacher mechanisms:
+#       - "linear_regression": y = x^T theta_teacher + noise_std * eps
+#       - "sign": y = sign(x^T theta_teacher + noise_std * eps) in {+1, -1}
+#       - "logistic": P(y=+1|x)=sigmoid(x^T theta_teacher / temperature)
+
+#     Notes
+#     -----
+#     * This is "teacher-student" in the sense that y is generated from x through
+#       a teacher parameter theta_teacher, but the covariates x are a mixture of
+#       two distributions (two modes).
+#     * For compatibility with your theory code (which expects "classes"), we
+#       treat the two modes as class_index=0 or 1 in sample_class().
+#     """
+
+#     p: int
+#     gamma: Array                    # shape (2,)
+#     mus: Sequence[Array]            # length 2, each (p,)
+#     covs: Sequence[Array]           # length 2, each (p,p)
+#     feature_dist: FeatureDistribution = "gaussian"
+
+#     theta_teacher: Optional[Array] = None
+#     y_model: Literal["linear_regression", "sign", "logistic"] = "linear_regression"
+#     noise_std: float = 1.0
+#     temperature: float = 1.0
+
+#     def __post_init__(self) -> None:
+#         # --- gamma ---
+#         self.gamma = np.asarray(self.gamma, dtype=float).reshape(-1)
+#         if self.gamma.shape != (2,):
+#             raise ValueError(f"gamma must have shape (2,), got {self.gamma.shape}")
+#         if np.any(self.gamma < 0):
+#             raise ValueError("gamma must be nonnegative")
+#         s = float(np.sum(self.gamma))
+#         if not np.isfinite(s) or s <= 0:
+#             raise ValueError("gamma must sum to a positive finite number")
+#         self.gamma = self.gamma / s
+
+#         # --- mus/covs ---
+#         if len(self.mus) != 2 or len(self.covs) != 2:
+#             raise ValueError("mus and covs must each have length 2")
+#         self.mus = [_as_1d(self.mus[k], self.p, f"mu[{k}]") for k in range(2)]
+#         self.covs = [_as_2d(self.covs[k], self.p, f"C[{k}]") for k in range(2)]
+
+#         # --- teacher ---
+#         if self.theta_teacher is None:
+#             self.theta_teacher = np.zeros(self.p, dtype=float)
+#         self.theta_teacher = _as_1d(self.theta_teacher, self.p, "theta_teacher")
+
+#         self.noise_std = float(self.noise_std)
+#         self.temperature = float(self.temperature)
+#         if self.temperature <= 0:
+#             raise ValueError("temperature must be > 0")
+
+#         # uniform_iid only matches diagonal covariance; if any mode has non-diagonal cov, fallback
+#         if self.feature_dist == "uniform_iid":
+#             if any(not _is_diagonal(C) for C in self.covs):
+#                 self.feature_dist = "uniform_affine"
+
+#     @property
+#     def num_classes(self) -> int:
+#         # treat modes as "classes" for conditional sampling / theory expectations
+#         return 2
+
+#     def _sample_x_mode(self, k: int, n: int, rng: np.random.Generator) -> Array:
+#         mu = self.mus[k]
+#         C = self.covs[k]
+#         if self.feature_dist == "gaussian":
+#             return sample_gaussian(n, mu, C, rng)
+#         elif self.feature_dist == "uniform_iid":
+#             var = np.diag(C)
+#             return sample_uniform_iid_from_mean_var(n, mu, var, rng)
+#         elif self.feature_dist == "uniform_affine":
+#             return sample_uniform_affine(n, mu, C, rng)
+#         else:
+#             raise ValueError(f"Unknown feature_dist={self.feature_dist}")
+
+#     def _sample_y(self, X: Array, rng: np.random.Generator) -> Array:
+#         s = X @ self.theta_teacher
+#         if self.y_model == "linear_regression":
+#             y = s + self.noise_std * rng.standard_normal(size=s.shape[0])
+#             return y.astype(float)
+#         elif self.y_model == "sign":
+#             y = s + self.noise_std * rng.standard_normal(size=s.shape[0])
+#             y = np.where(y >= 0, 1.0, -1.0)
+#             return y.astype(float)
+#         elif self.y_model == "logistic":
+#             t = s / self.temperature
+#             p_pos = 1.0 / (1.0 + np.exp(-t))
+#             u = rng.uniform(size=t.shape[0])
+#             y = np.where(u < p_pos, 1.0, -1.0)
+#             return y.astype(float)
+#         else:
+#             raise ValueError(f"Unknown y_model={self.y_model}")
+
+#     def sample_class(
+#         self, class_index: int, n: int, rng: Optional[np.random.Generator] = None
+#     ) -> Tuple[Array, Array]:
+#         """
+#         Sample conditionally on the mode (class_index = 0 or 1).
+#         """
+#         rng = np.random.default_rng() if rng is None else rng
+#         k = int(class_index)
+#         if k not in (0, 1):
+#             raise ValueError("class_index must be 0 or 1")
+#         X = self._sample_x_mode(k, n, rng)
+#         y = self._sample_y(X, rng)
+#         return X, y
+
+#     def sample(self, n: int, rng: Optional[np.random.Generator] = None) -> Tuple[Array, Array]:
+#         """
+#         Sample from the bimodal mixture.
+#         """
+#         rng = np.random.default_rng() if rng is None else rng
+#         mode = rng.choice(2, size=n, p=self.gamma)
+
+#         X = np.zeros((n, self.p), dtype=float)
+#         for k in (0, 1):
+#             mask = (mode == k)
+#             nk = int(np.sum(mask))
+#             if nk > 0:
+#                 X[mask] = self._sample_x_mode(k, nk, rng)
+
+#         y = self._sample_y(X, rng)
+#         return X, y
+
+#     def overall_mean_cov(self) -> Tuple[Array, Array]:
+#         """
+#         Return the unconditional mean and covariance of x under the mixture.
+
+#         mean = sum_k gamma_k mu_k
+#         cov  = sum_k gamma_k (C_k + (mu_k-mean)(mu_k-mean)^T)
+#         """
+#         mu0, mu1 = self.mus
+#         C0, C1 = self.covs
+#         g0, g1 = float(self.gamma[0]), float(self.gamma[1])
+
+#         mean = g0 * mu0 + g1 * mu1
+#         d0 = (mu0 - mean).reshape(-1, 1)
+#         d1 = (mu1 - mean).reshape(-1, 1)
+#         cov = g0 * (C0 + d0 @ d0.T) + g1 * (C1 + d1 @ d1.T)
+#         return mean, cov
+
+#     def class_params(self) -> dict:
+#         """
+#         Provide mode parameters to the theory code.
+
+#         Here "classes" correspond to the two modes of x, not to label values.
+#         """
+#         return dict(
+#             p=self.p,
+#             num_classes=2,
+#             gamma=self.gamma.copy(),
+#             mus=[m.copy() for m in self.mus],
+#             covs=[C.copy() for C in self.covs],
+#             y_values=None,  # labels are generated by teacher, not fixed per class
+        # )
 @dataclass
 class TeacherStudentModel(BaseDataModel):
     """
@@ -429,6 +606,28 @@ class TeacherStudentModel(BaseDataModel):
         # Single-class model: ignore class_index
         return self.sample(n, rng=rng)
 
+
+    def error_classif_th(self,mu: Array, alpha: Array, num_trials_th=100000, rng: Optional[np.random.Generator] = None) -> float:
+        rng = np.random.default_rng() if rng is None else rng
+        if self.y_model != "sign":
+            raise ValueError("for classification y_model must be sign")
+        z_samples = rng.standard_normal(size=num_trials_th) 
+        Xtst, utst = self.sample_class(0,num_trials_th, rng=rng)
+        scores_th = Xtst@mu + alpha*z_samples
+        return float(sum(np.array(scores_th)>0)/num_trials_th)
+
+    def error_classif_emp(self, thetas_rcrd: Sequence[Array], n_test=5000, rng: Optional[np.random.Generator] = None) -> float:
+        rng = np.random.default_rng() if rng is None else rng
+        if self.y_model != "sign":
+            raise ValueError("for classification y_model must be sign")
+        num_trials = len(thetas_rcrd)
+        sc_emp=[]
+        for i in range(num_trials):
+            Xte, ute = self.sample_class(0, n_test, rng=rng)
+            # eps, yte = self._split_u(ute)
+            sc_emp += [Xte[j]@thetas_rcrd[i] for j in range(n_test)]
+        return float(sum(np.array(sc_emp)>0)/(num_trials*n_test))
+
     def class_params(self) -> dict:
         return dict(
             p=self.p,
@@ -440,32 +639,218 @@ class TeacherStudentModel(BaseDataModel):
         )
 
 
+
 @dataclass
-class MixtureClassificationModel(BaseDataModel): # Inherit from BaseDataModel if available in your env
+class TwoModeTeacherStudentModel(BaseDataModel):
+    """
+    Teacher/student model where x has a *two-mode* (bimodal) distribution,
+    but the task is still a standard teacher/student regression or classification
+    (y is generated from x through a teacher).
+
+    Construction:
+      - You specify the *overall* mean mu_x and covariance C_x.
+      - You specify a mode-separation vector delta (Delta) and a mixing weight pi.
+      - We build a two-component mixture for x:
+            mode m ~ Bernoulli(pi)
+            x | (m=0) ~ D(mu0, C_base)
+            x | (m=1) ~ D(mu1, C_base)
+        where
+            mu0 = mu_x - pi * delta
+            mu1 = mu_x + (1-pi) * delta
+            C_base = C_x - pi*(1-pi) * delta delta^T
+        so that the *unconditional* mean/covariance of x are exactly (mu_x, C_x)
+        (as long as C_base is PSD).
+
+    Feature sampling options (for each mode):
+      - "gaussian": N(mu_mode, C_base)
+      - "uniform_iid": independent Uniform coords matching mu_mode and diag(C_base)
+      - "uniform_affine": affine-uniform matching full C_base
+
+    Teacher mechanisms (same as TeacherStudentModel):
+      - "linear_regression": y = x^T theta_teacher + noise_std * eps
+      - "sign": y = sign(x^T theta_teacher + noise_std * eps) in {+1, -1}
+      - "logistic": P(y=+1|x)=sigmoid(x^T theta_teacher / temperature)
+
+    Notes
+    -----
+    * This model has num_classes=1 for theory code compatibility; the two modes
+      are *not* exposed as classes.
+    * If C_base is not PSD, the requested (mu_x, C_x, pi, delta) combination is
+      infeasible. Reduce ||delta|| or adjust pi.
+    """
+
+    p: int
+    mu_x: Array
+    C_x: Array
+    feature_dist: FeatureDistribution = "gaussian"
+
+    # Bimodality parameters
+    pi: float = 0.5                    # P(mode=1), must be in (0,1)
+    delta: Optional[Array] = None      # mode separation vector (mu1 - mu0)
+
+    # Teacher parameters
+    theta_teacher: Optional[Array] = None
+    y_model: Literal["linear_regression", "sign", "logistic"] = "linear_regression"
+    noise_std: float = 1.0
+    temperature: float = 1.0
+
+    def __post_init__(self) -> None:
+        self.mu_x = _as_1d(self.mu_x, self.p, "mu_x")
+        self.C_x = _as_2d(self.C_x, self.p, "C_x")
+
+        self.pi = float(self.pi)
+        if not (0.0 < self.pi < 1.0):
+            raise ValueError("pi must be in (0,1)")
+
+        if self.delta is None:
+            self.delta = np.zeros(self.p, dtype=float)
+        self.delta = _as_1d(self.delta, self.p, "delta")
+
+        if self.theta_teacher is None:
+            self.theta_teacher = np.zeros(self.p, dtype=float)
+        self.theta_teacher = _as_1d(self.theta_teacher, self.p, "theta_teacher")
+
+        self.noise_std = float(self.noise_std)
+        self.temperature = float(self.temperature)
+        if self.temperature <= 0.0:
+            raise ValueError("temperature must be > 0")
+
+        # Build component means and shared within-mode covariance
+        pi = self.pi
+        delta = self.delta
+
+        self._mu0 = self.mu_x - pi * delta
+        self._mu1 = self.mu_x + (1.0 - pi) * delta
+
+        C_base = self.C_x - (pi * (1.0 - pi)) * np.outer(delta, delta)
+        self._C_base = _symmetrize(C_base)
+
+        # PSD check (allow tiny numerical negatives)
+        w = np.linalg.eigvalsh(self._C_base)
+        min_w = float(np.min(w))
+        if min_w < -1e-10:
+            raise ValueError(
+                "Infeasible bimodal parameters: C_base = C_x - pi(1-pi) delta delta^T "
+                "is not PSD. Reduce ||delta|| or adjust pi."
+            )
+        # If slightly negative due to numerical noise, add a tiny jitter
+        if min_w < 0.0:
+            self._C_base = self._C_base + (-min_w + 1e-12) * np.eye(self.p)
+
+        # For uniform_iid, fall back to uniform_affine if covariance not diagonal.
+        if self.feature_dist == "uniform_iid" and not _is_diagonal(self._C_base):
+            self.feature_dist = "uniform_affine"
+
+    def _sample_x_mode(self, mu_mode: Array, n: int, rng: np.random.Generator) -> Array:
+        if self.feature_dist == "gaussian":
+            return sample_gaussian(n, mu_mode, self._C_base, rng)
+        elif self.feature_dist == "uniform_iid":
+            var = np.diag(self._C_base)
+            return sample_uniform_iid_from_mean_var(n, mu_mode, var, rng)
+        elif self.feature_dist == "uniform_affine":
+            return sample_uniform_affine(n, mu_mode, self._C_base, rng)
+        else:
+            raise ValueError(f"Unknown feature_dist={self.feature_dist}")
+
+    def _sample_x(self, n: int, rng: np.random.Generator) -> Array:
+        # One mode per sample
+        mode1 = rng.uniform(size=n) < self.pi
+        X = np.zeros((n, self.p), dtype=float)
+
+        n1 = int(np.sum(mode1))
+        n0 = n - n1
+        if n0 > 0:
+            X[~mode1] = self._sample_x_mode(self._mu0, n0, rng)
+        if n1 > 0:
+            X[mode1] = self._sample_x_mode(self._mu1, n1, rng)
+        return X
+
+    def _sample_y(self, X: Array, rng: np.random.Generator) -> Array:
+        s = X @ self.theta_teacher
+        if self.y_model == "linear_regression":
+            y = s + self.noise_std * rng.standard_normal(size=s.shape[0])
+            return y.astype(float)
+        elif self.y_model == "sign":
+            y = s + self.noise_std * rng.standard_normal(size=s.shape[0])
+            return np.where(y >= 0, 1.0, -1.0).astype(float)
+        elif self.y_model == "logistic":
+            t = s / float(self.temperature)
+            p_pos = 1.0 / (1.0 + np.exp(-t))
+            u = rng.uniform(size=t.shape[0])
+            return np.where(u < p_pos, 1.0, -1.0).astype(float)
+        else:
+            raise ValueError(f"Unknown y_model={self.y_model}")
+
+    def sample(self, n: int, rng: Optional[np.random.Generator] = None) -> Tuple[Array, Array]:
+        rng = np.random.default_rng() if rng is None else rng
+        X = self._sample_x(n, rng)
+        y = self._sample_y(X, rng)
+        return X, y
+
+    def sample_class(self, class_index: int, n: int, rng: Optional[np.random.Generator] = None):
+        # Single-population interface: ignore class_index
+        return self.sample(n, rng=rng)
+
+    def class_params(self) -> dict:
+        # For theory code: expose only the unconditional mean/covariance.
+        return dict(
+            p=self.p,
+            num_classes=1,
+            gamma=np.array([1.0]),
+            mus=[self.mu_x.copy()],
+            covs=[self.C_x.copy()],
+            y_values=None,
+        )
+from dataclasses import dataclass
+from typing import Sequence, Optional, Tuple, Literal
+import numpy as np
+
+# Assuming BaseDataModel, Array, and helper functions (_as_1d, _as_2d, _is_diagonal, etc.) 
+# are defined in your environment as per your snippet. 
+# If not, simpler versions would need to be added.
+
+FeatureDistribution = Literal["gaussian", "uniform_iid", "uniform_affine", "beta"]
+Array = np.ndarray
+
+def sample_gaussian(n, mu, C, rng):
+    return rng.multivariate_normal(mu, C, n)
+
+def sample_uniform_iid_from_mean_var(n, mu, var, rng):
+    # Uniform[a, b] has mean (a+b)/2 and var (b-a)^2/12
+    # width = sqrt(12 * var)
+    width = np.sqrt(12 * var)
+    a = mu - width / 2
+    b = mu + width / 2
+    return rng.uniform(a, b, (n, len(mu)))
+
+def sample_uniform_affine(n, mu, C, rng):
+    # X = U * A + mu, where U ~ Uniform[-0.5, 0.5]
+    # Cov(X) = A^T Cov(U) A = A^T (I/12) A = (1/12) A^T A
+    # We need C = (1/12) A^T A  =>  12*C = A^T A
+    # We can use Cholesky: A = cholesky(12*C).T
+    # However, standard implementations might vary. 
+    # Simplified placeholder logic:
+    p = len(mu)
+    L = np.linalg.cholesky(12 * C)
+    # U is usually defined on [0,1], centered is [-0.5, 0.5]
+    U = rng.uniform(-0.5, 0.5, (n, p)) 
+    return U @ L.T + mu
+
+@dataclass
+class MixtureClassificationModel(BaseDataModel):
     """
     K-class mixture model for classification-like settings with optional bimodal features.
 
-    A class label y takes values y_values[k] with probability gamma[k].
-    Then x|y=y_values[k] is distributed as a mixture of two sub-modes:
-       0.5 * P(x | center = mu_k - delta_k/2) + 0.5 * P(x | center = mu_k + delta_k/2)
-
-    Parameters
-    ----------
-    p : int
-        Dimension of feature vector.
-    gamma : array-like shape (K,)
-        Class proportions.
-    mus : sequence of length K, each shape (p,)
-        The global center of each class.
-    covs : sequence of length K, each shape (p,p)
-        Covariance matrix for the sub-modes.
-    sub_mode_deltas : Optional[Sequence[Array]]
-        Sequence of length K, each shape (p,). 
-        Represents the vector difference between the two sub-modes for class k.
-        If None, defaults to zeros (unimodal).
-    y_values : sequence of length K
-        The actual label values (e.g., [0, 1] or [-1, 1]).
-    feature_dist : {"gaussian", "uniform_iid", "uniform_affine"}
+    Supports Gaussian, Uniform, and Beta distributions.
+    
+    For Beta distribution:
+        - Set feature_dist="beta"
+        - Provide `alphas` and `betas` (lists of length K).
+        - `mus` and `covs` are ignored for sampling but required by the class structure 
+          (you can pass dummies or use them to store theoretical means/vars).
+        - `sub_mode_deltas` splits the ALPHA parameter: 
+             Left Mode Alpha = alpha - delta/2
+             Right Mode Alpha = alpha + delta/2
     """
     p: int
     gamma: Array
@@ -474,6 +859,10 @@ class MixtureClassificationModel(BaseDataModel): # Inherit from BaseDataModel if
     sub_mode_deltas: Optional[Sequence[Array]] = None
     y_values: Optional[Sequence[float]] = None
     feature_dist: FeatureDistribution = "gaussian"
+    
+    # --- NEW: Beta parameters ---
+    alphas: Optional[Sequence[Array]] = None
+    betas: Optional[Sequence[Array]] = None
 
     def __post_init__(self) -> None:
         self.gamma = np.asarray(self.gamma, dtype=float).reshape(-1)
@@ -494,22 +883,33 @@ class MixtureClassificationModel(BaseDataModel): # Inherit from BaseDataModel if
         self.mus = [_as_1d(mu, self.p, f"mu[{k}]") for k, mu in enumerate(self.mus)]
         self.covs = [_as_2d(C, self.p, f"C[{k}]") for k, C in enumerate(self.covs)]
 
-        # --- NEW: Handle sub_mode_deltas ---
+        # --- Handle sub_mode_deltas ---
         if self.sub_mode_deltas is None:
-            # Default to no separation (unimodal)
             self.sub_mode_deltas = [np.zeros(self.p) for _ in range(K)]
         else:
             if len(self.sub_mode_deltas) != K:
                 raise ValueError("sub_mode_deltas must have length K=len(gamma)")
             self.sub_mode_deltas = [_as_1d(d, self.p, f"delta[{k}]") for k, d in enumerate(self.sub_mode_deltas)]
-        # -----------------------------------
 
         if self.y_values is None:
-            # Default: integer labels 0..K-1
             self.y_values = list(range(K))
         if len(self.y_values) != K:
             raise ValueError("y_values must have length K=len(gamma)")
         self.y_values = [float(v) for v in self.y_values]
+
+        # --- NEW: Handle Beta Params ---
+        if self.feature_dist == "beta":
+            if self.alphas is None or self.betas is None:
+                raise ValueError("If feature_dist='beta', `alphas` and `betas` must be provided.")
+            if len(self.alphas) != K or len(self.betas) != K:
+                raise ValueError("alphas and betas must have length K=len(gamma)")
+            
+            self.alphas = [_as_1d(a, self.p, f"alpha[{k}]") for k, a in enumerate(self.alphas)]
+            self.betas = [_as_1d(b, self.p, f"beta[{k}]") for k, b in enumerate(self.betas)]
+            
+            # Check for valid params (>0)
+            if any(np.any(a <= 0) for a in self.alphas) or any(np.any(b <= 0) for b in self.betas):
+                raise ValueError("Alpha and Beta parameters must be strictly positive.")
 
         # For uniform_iid, fall back to uniform_affine if any covariance is not diagonal.
         if self.feature_dist == "uniform_iid":
@@ -520,46 +920,71 @@ class MixtureClassificationModel(BaseDataModel): # Inherit from BaseDataModel if
     def num_classes(self) -> int:
         return int(self.gamma.shape[0])
 
-    def _sample_from_dist(self, n: int, mu: Array, C: Array, rng: np.random.Generator) -> Array:
-        """Helper to sample from the specific base distribution."""
+    def _sample_from_dist(self, n: int, param1: Array, param2: Array, rng: np.random.Generator) -> Array:
+        """
+        Helper to sample from the specific base distribution.
+        
+        Args:
+            param1: Primary parameter (Mean `mu` for Gaussian/Uniform, Shape `alpha` for Beta)
+            param2: Secondary parameter (Covariance `C` for Gaussian/Uniform, Shape `beta` for Beta)
+        """
         if n == 0:
             return np.zeros((0, self.p))
             
         if self.feature_dist == "gaussian":
-            return sample_gaussian(n, mu, C, rng)
+            return sample_gaussian(n, param1, param2, rng)
         elif self.feature_dist == "uniform_iid":
-            var = np.diag(C)
-            return sample_uniform_iid_from_mean_var(n, mu, var, rng)
+            var = np.diag(param2)
+            return sample_uniform_iid_from_mean_var(n, param1, var, rng)
         elif self.feature_dist == "uniform_affine":
-            return sample_uniform_affine(n, mu, C, rng)
+            return sample_uniform_affine(n, param1, param2, rng)
+        elif self.feature_dist == "beta":
+            # param1 is alpha (vector), param2 is beta (vector)
+            # numpy.random.beta takes `a` and `b`. 
+            # If `p` > 1, passing arrays (p,) works and returns (n, p) if size=(n, p)
+            return rng.beta(param1, param2, size=(n, self.p))
         else:
             raise ValueError(f"Unknown feature_dist={self.feature_dist}")
 
     def _sample_x_k(self, k: int, n: int, rng: np.random.Generator) -> Array:
-        mu_center = self.mus[k]
+        # 1. Select Parameters based on distribution
+        if self.feature_dist == "beta":
+            # For Beta, we use alphas and betas
+            # Primary = Alpha, Secondary = Beta
+            p1_center = self.alphas[k]
+            p2_center = self.betas[k]
+        else:
+            # For Gaussian/Uniform, we use mus and covs
+            # Primary = Mu, Secondary = Covariance
+            p1_center = self.mus[k]
+            p2_center = self.covs[k]
+
         delta = self.sub_mode_deltas[k]
-        C = self.covs[k]
 
         # If delta is essentially zero, use standard unimodal sampling
         if np.allclose(delta, 0):
-            return self._sample_from_dist(n, mu_center, C, rng)
+            return self._sample_from_dist(n, p1_center, p2_center, rng)
 
         # --- Bimodal Logic ---
         # We split the n samples into two sub-modes with 50/50 probability
-        # 1. Assign each sample to mode 0 (left) or mode 1 (right)
-        mode_choices = rng.integers(0, 2, size=n) # 0 or 1
+        mode_choices = rng.integers(0, 2, size=n) 
         n_left = np.sum(mode_choices == 0)
         n_right = n - n_left
 
         # 2. Define centers for sub-modes
-        # Mode 1: mu - delta/2
-        # Mode 2: mu + delta/2
-        mu_left = mu_center - 0.5 * delta
-        mu_right = mu_center + 0.5 * delta
+        # Shift the PRIMARY parameter by +/- delta/2
+        # For Gaussian: Shift Mean. For Beta: Shift Alpha.
+        p1_left = p1_center - 0.5 * delta
+        p1_right = p1_center + 0.5 * delta
+
+        # Note: For Beta, this shift must keep alpha > 0.
+        if self.feature_dist == "beta":
+            if np.any(p1_left <= 0) or np.any(p1_right <= 0):
+                raise ValueError(f"Splitting Alpha with delta results in non-positive alpha for class {k}")
 
         # 3. Sample
-        X_left = self._sample_from_dist(n_left, mu_left, C, rng)
-        X_right = self._sample_from_dist(n_right, mu_right, C, rng)
+        X_left = self._sample_from_dist(n_left, p1_left, p2_center, rng)
+        X_right = self._sample_from_dist(n_right, p1_right, p2_center, rng)
 
         # 4. Combine preserving random order
         X = np.empty((n, self.p), dtype=float)
@@ -595,7 +1020,7 @@ class MixtureClassificationModel(BaseDataModel): # Inherit from BaseDataModel if
         return X, y
 
     def class_params(self) -> dict:
-        return dict(
+        base = dict(
             p=self.p,
             num_classes=self.num_classes,
             gamma=self.gamma.copy(),
@@ -604,7 +1029,11 @@ class MixtureClassificationModel(BaseDataModel): # Inherit from BaseDataModel if
             sub_mode_deltas=[d.copy() for d in self.sub_mode_deltas],
             y_values=list(self.y_values),
         )
-    
+        if self.alphas is not None:
+            base['alphas'] = [a.copy() for a in self.alphas]
+        if self.betas is not None:
+            base['betas'] = [b.copy() for b in self.betas]
+        return base
 
 @dataclass
 class MixtureClassificationModelGaussian(BaseDataModel): # Inherit from BaseDataModel if available in your env
