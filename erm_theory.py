@@ -97,7 +97,7 @@ class ERMTrainer:
         Uses scipy.optimize.minimize.
         """
         X = np.asarray(X, dtype=float)
-        y = np.asarray(y, dtype=float).reshape(-1)
+        y = np.asarray(y, dtype=float)
         n, p = X.shape
         if y.shape[0] != n:
             raise ValueError("X and y must have compatible shapes")
@@ -160,7 +160,7 @@ class ERMTrainer:
     def run_trials(
         self,
         n_train: int,
-        # n_test: int,
+        n_test: int,
         num_trials: int,
         rng: Optional[np.random.Generator] = None,
         **solver_kwargs: Any,
@@ -171,7 +171,7 @@ class ERMTrainer:
           - cov(theta_hat)
           - mean generalization loss
         """
-        n_test=1
+        # n_test=1
         rng = np.random.default_rng() if rng is None else rng
         self.thetas = []
         losses = []
@@ -225,6 +225,7 @@ class TheoryFixedPointSolver:
         self.p = int(params["p"])
         self.K = int(params["num_classes"])
         self.gamma = np.asarray(params["gamma"], dtype=float).reshape(-1)
+        self.mus = [np.asarray(C, dtype=float) for C in params["mus"]]
         self.covs = [np.asarray(C, dtype=float) for C in params["covs"]]
         y_values = params.get("y_values", None)
         if y_values is None:
@@ -271,6 +272,14 @@ class TheoryFixedPointSolver:
         return self.loss.estimate_expected_loss(
             X=Xk, y=yk, mu=mu, alpha=alpha_k, z_samples=zk, rng=self.rng
         )
+    def _expected_loss_for_class_gaussian_score(
+        self, k: int, mu: Array, alpha_k: float
+    ) -> float:
+        return self.loss.estimate_expected_loss_gaussian_score(
+            muk=self.mus[k], Ck=self.covs[k], y=self.y_mc[k], mu=mu, alpha=alpha_k, z_samples=self.z_mc[k], rng=self.rng
+        )
+
+
 
     def solve(
         self,
@@ -307,6 +316,8 @@ class TheoryFixedPointSolver:
         kappa = np.ones(K, dtype=float)
 
         for it in range(int(max_iter)):
+            if it%10 == 0 and verbose:
+                print(f"[FP] Starting iter {it:03d}")
             # Q(ν) = (Σ γ_k ν_k C_k + ∇^2ρ(μ))^{-1}
             H_mu = self.regularizer.hessian(mu)
             S = H_mu.copy()
@@ -378,7 +389,7 @@ class TheoryFixedPointSolver:
 
             # Convergence check
             delta = max(
-                float(np.max(np.abs(mu_upd - mu))),
+                float(np.linalg.norm(mu_upd - mu)),
                 float(np.max(np.abs(alpha_upd - alpha))),
                 float(np.max(np.abs(nu_upd - nu))),
             )
@@ -390,26 +401,26 @@ class TheoryFixedPointSolver:
                       f"||mu||={np.linalg.norm(mu):.3e}  "
                       f"alpha={alpha}  kappa={kappa}")
 
-            if delta < tol and it >= 10:
+            if delta < d_it*tol and it >= 9:
                 converged = True
                 break
 
         # Predicted generalization loss
         pred_loss = 0.0
-        pred_loss_gauss = 0.0
+        pred_loss_gauss_score = 0.0
         for k in range(K):
-            first, second = self._expected_loss_for_class(k, mu=mu, alpha_k=alpha[k])
-            pred_loss += self.gamma[k] * first
-            pred_loss_gauss += self.gamma[k] * second
+            pred_loss += self.gamma[k] * self._expected_loss_for_class(k, mu=mu, alpha_k=alpha[k])
+            pred_loss_gauss_score += self.gamma[k] * self._expected_loss_for_class_gaussian_score(k, mu=mu, alpha_k=alpha[k])
 
         return dict(
-            mu_star=mu,
+            mu=mu,
             alpha=alpha,
             kappa=kappa,
             nu=nu,
             Q=Q,
+            A = trace_terms,
             predicted_loss=float(pred_loss),
-            predicted_loss_gauss=float(pred_loss_gauss),
+            pred_loss_gauss_score = float(pred_loss_gauss_score),
             converged=converged,
             num_iter=it + 1,
             damping_final = d_it,
