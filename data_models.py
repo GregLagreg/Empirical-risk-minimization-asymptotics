@@ -203,6 +203,12 @@ def make_aligned_vector(w_star: Array, rho: float, rng: Rng) -> Array:
     w_g = rho * w_star + np.sqrt(max(1.0 - rho**2, 0.0)) * v
     return unit(w_g)
 
+def cosine_similarity(a, b):
+    a = np.asarray(a, dtype=float).reshape(-1)
+    b = np.asarray(b, dtype=float).reshape(-1)
+    return float(a @ b / (np.linalg.norm(a) * np.linalg.norm(b) + 1e-12))
+
+
 
 def _affine_matrix_from_covariances(C_base: Array, C_target: Array) -> Array:
     """
@@ -944,7 +950,7 @@ class BaseDataModel(ABC):
     # ------------------------------------------------------------------
     # Utility: Monte-Carlo validation of (mu_k, C_k, gamma_k)
     # ------------------------------------------------------------------
-    def validate_model_moments(self, n_samples_per_class: int = 20000) -> None:
+    def validate_model_moments(self) -> None:
         """
         Monte-Carlo check: compares sampled class means/covs with class_params().
 
@@ -952,6 +958,7 @@ class BaseDataModel(ABC):
         because it uses sample_class(k, ...) rather than filtering by y.
         """
         params = self.class_params()
+        n_samples_per_class = params['p']*1000
         mus = params.get("mus")
         covs = params.get("covs")
         gamma = np.asarray(params.get("gamma"), dtype=float).reshape(-1)
@@ -1215,6 +1222,7 @@ class MultiClassModel(BaseDataModel):
             mus.append(np.asarray(mu_c, dtype=float))
             covs.append(np.asarray(C_c, dtype=float))
         return {
+            "type": "MultiClassModel",
             "p": int(self.p),
             "num_classes": int(self.num_classes),
             "gamma": self._gamma.copy(),
@@ -1230,6 +1238,44 @@ class MultiClassModel(BaseDataModel):
 
     def error_classif_emp(self, *args, **kwargs) -> float:  # type: ignore[override]
         return super().error_classif_emp(*args, **kwargs)
+        
+    def _expected_loss_for_class_gaussian_score(self, k: int, mu: Array, alpha_k: float, rng=None) -> float:
+        """Estimate E[ℓ_y(S)] when S is Gaussian.
+
+        If x ~ N(muk, Ck) and z~N(0,1) independent, then:
+            S = mu^T x + alpha z ~ N(mean, var)
+        with mean = mu^T muk and var = mu^T Ck mu + alpha^2.
+        """
+
+        muk = np.asarray(self.mus[k], dtype=float).reshape(-1)
+        Ck = np.asarray(self.covs[k], dtype=float)
+        mu = np.asarray(mu, dtype=float).reshape(-1)
+        if Ck.shape != (mu.size, mu.size):
+            raise ValueError("Ck must have shape (p,p) matching mu")
+
+        mean = float(mu @ muk)
+        var = float(mu @ (Ck @ mu) + float(alpha_k) ** 2)
+        if var < 0:
+            raise ValueError("Computed variance is negative; check Ck and alpha")
+        z_samples = np.asarray(self.z_mc[k], dtype=float).reshape(-1)
+        # T =  z_samples.shape[0] 
+        scores = mean + np.sqrt(var) * z_samples
+        mdl_class = self.model.class_params()["type"]
+        if mdl_class == "TeacherStudentModel":
+            y = self.model._sample_y_given_X(scores)
+        elif mdl_class == "RealGeneratedPrunedModel" or mdl_class == "RealGeneratedModel":
+            raise ValueError(f"for {mdl_class}, to assume Gaussian score, simply consider Gaussian data")
+            # if k<self.model.K_base:
+            #     y = self.model.real_model._sample_y_given_X(scores)
+            # else:
+            #     y = self.model.gen_model._sample_y_given_X(scores)
+        elif mdl_class == "MultiClassModel":
+            y = np.full_like(scores, self.model._y_values[k])
+        else:
+            raise ValueError(f"Unexpected model class: {mdl_class}")
+        return float(np.mean(self.loss.value(scores, y)))
+        # predicted_loss_gauss = float(np.sum([self.gamma[k] * self._expected_loss_for_class_gaussian_score(k, mu, float(alpha[k])) for k in range(K)]))
+
 
 
 TeacherModel = Literal["linear_regression", "sign", "logistic"]
@@ -1292,7 +1338,8 @@ class TeacherStudentModel(BaseDataModel):
             return np.asarray(X, dtype=float)
         return np.asarray(self.x_model.sample(n, rng=rng), dtype=float)
 
-    def _sample_y_given_X(self, X: Array, rng: Rng) -> Array:
+    def _sample_y_given_X(self, X: Array, rng: Rng =None) -> Array:
+        rng = rng_or_default(rng)
         s = X @ self.theta_teacher
         if self.y_model == "linear_regression":
             y = s + float(self.noise_std) * rng.standard_normal(size=s.shape[0])
@@ -1335,6 +1382,7 @@ class TeacherStudentModel(BaseDataModel):
             covs = [np.asarray(C_x, dtype=float)]
 
         return dict(
+            type= "TeacherStudentModel",
             p=int(self.p),
             num_classes=int(self.num_classes),
             gamma=gamma.copy(),
@@ -1690,6 +1738,12 @@ class MNISTGroupedDataModel(BaseDataModel):
             b = np.asarray(self.bias, dtype=float).reshape(-1)
             if b.shape != (m,):
                 raise ValueError(f"bias must have shape ({m},), got {b.shape}")
+        pools = self._class_pools(self.stats_split)
+
+        sizes = np.array([len(p) for p in pools], dtype=float)
+        if sizes.sum() <= 0:
+            raise ValueError("No stats samples available after applying class_groups.")
+        self.gamma = sizes / sizes.sum()
 
     @property
     def num_classes(self) -> int:
@@ -1796,10 +1850,10 @@ class MNISTGroupedDataModel(BaseDataModel):
         X_raw_all, _ = self._get_split(self.stats_split)
         pools = self._class_pools(self.stats_split)
 
-        sizes = np.array([len(p) for p in pools], dtype=float)
-        if sizes.sum() <= 0:
-            raise ValueError("No stats samples available after applying class_groups.")
-        gamma = sizes / sizes.sum()
+        # sizes = np.array([len(p) for p in pools], dtype=float)
+        # if sizes.sum() <= 0:
+        #     raise ValueError("No stats samples available after applying class_groups.")
+        # gamma = sizes / sizes.sum()
 
         dt = np.dtype(self.dtype)
         mus: List[Array] = []
@@ -1824,7 +1878,7 @@ class MNISTGroupedDataModel(BaseDataModel):
         params = {
             "p": int(self.p),
             "num_classes": int(self.num_classes),
-            "gamma": gamma.astype(dt, copy=False),
+            "gamma": self.gamma.astype(dt, copy=False),
             "mus": mus,
             "covs": covs,
             "y_values": list(range(self.num_classes)),
@@ -1975,6 +2029,7 @@ class RealGeneratedPrunedModel(BaseDataModel):
             w_values = [w_r for _ in range(self.K_base)] + [w_g for _ in range(self.K_base)]
 
         return dict(
+            type= "RealGeneratedPrunedModel",
             p=int(self.p),
             num_classes=int(self.num_classes),
             gamma=self._gamma.copy(),

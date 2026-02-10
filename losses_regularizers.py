@@ -256,92 +256,6 @@ class Loss:
         E_rx = np.mean(r_vals[:, None] * X, axis=0)
         E_rz = float(np.mean(r_vals * z_samples))
         return dict(E_r2=E_r2, E_rx=E_rx, E_rz=E_rz)
-
-
-    # def estimate_expected_loss_gaussian_score(
-    #     self,
-    #     muk:Array,
-    #     Ck: Array,
-    #     y: Array,
-    #     mu: Array,
-    #     alpha: float,
-    #     z_samples: Optional[Array] = None,
-    #     rng: Optional[np.random.Generator] = None,
-    # ) -> float:
-    #     """
-    #     Estimate E[L_y( mu^T x + alpha z )] using provided samples (X, y) and z.
-    #     """
-    #     muk = np.asarray(muk, dtype=float)
-    #     Ck = np.asarray(Ck, dtype=float)
-    #     y = np.asarray(y, dtype=float).reshape(-1)
-    #     mu = np.asarray(mu, dtype=float).reshape(-1,1)
-    #     (T,) = y.shape
-    #     (p,p) =Ck.shape
-    #     if mu.shape[0] != p:
-    #         raise ValueError("mu must have shape (p,)")
-    #     if rng is None:
-    #         rng = np.random.default_rng()
-    #     if z_samples is None:
-    #         z_samples = rng.standard_normal(size=T)
-    #     else:
-    #         z_samples = np.asarray(z_samples, dtype=float).reshape(-1)
-    #         if z_samples.shape[0] != T:
-    #             raise ValueError("z_samples must have length T")
-    #     u = mu.T@muk + np.sqrt(mu.T @ Ck @ mu + float(alpha)**2) * z_samples
-    #     return float(np.mean(self.value(u, y)))
-
-    # def estimate_expected_loss(
-    #         self,
-    #         *,
-    #         X: Array,
-    #         y: Array,
-    #         mu: Array,
-    #         alpha: float,
-    #         z_samples: Optional[Array] = None,
-    #         rng: Optional[np.random.Generator] = None,
-    #         assume_gaussian: bool = True  # Nouveau paramètre pour gérer l'hypothèse de la normalité
-    #     ) -> tuple:
-    #     """
-    #     Estimate E[L_y( mu^T x + alpha z )] using provided samples (X, y) and z.
-    #     Si assume_gaussian est True, l'estimation suppose que mu^T x + alpha z suit une distribution gaussienne.
-    #     """
-    #     X = np.asarray(X, dtype=float)
-    #     y = np.asarray(y, dtype=float)
-    #     mu = np.asarray(mu, dtype=float).reshape(-1)
-    #     T, p = X.shape
-        
-    #     if mu.shape[0] != p:
-    #         raise ValueError("mu must have shape (p,)")
-        
-    #     if rng is None:
-    #         rng = np.random.default_rng()
-        
-    #     if z_samples is None:
-    #         z_samples = rng.standard_normal(size=T)
-    #     else:
-    #         z_samples = np.asarray(z_samples, dtype=float).reshape(-1)
-    #         if z_samples.shape[0] != T:
-    #             raise ValueError("z_samples must have length T")
-        
-    #     u = X @ mu + float(alpha) * z_samples
-        
-    #     # Calcul du premier argument comme avant
-    #     first_estimation = float(np.mean(self.value(u, y)))
-        
-    #     if assume_gaussian:
-    #         # Estimation sous l'hypothèse gaussienne
-    #         mu_x = np.mean(X, axis=0) @ mu  # Calcul de la moyenne de X pour chaque observation mu^T x
-    #         # On suppose ici que z suit une distribution normale standard, donc la moyenne est mu_x et la variance est alpha^2
-    #         mean = mu_x
-    #         variance = alpha ** 2
-            
-    #         # Calcul de la perte attendue sous cette hypothèse (en utilisant une approximation)
-    #         # Ici, pour simplifier, on prend l'espérance de la perte en utilisant une moyenne et une variance normales
-    #         second_estimation = float(np.mean(self.value(rng.normal(mean, np.sqrt(variance), T), y)))
-    #     else:
-    #         second_estimation = None
-        
-    #     return first_estimation, second_estimation
     def estimate_expected_loss(
         self,
         *,
@@ -370,16 +284,18 @@ class Loss:
             if z_samples.shape[0] != T:
                 raise ValueError("z_samples must have length T")
         u = X @ mu + float(alpha) * z_samples
+        
         return float(np.mean(self.value(u, y)))
     
     def estimate_expected_loss_gaussian_score(
         self,
+        y,
         muk:Array,
         Ck: Array,
-        y: Array,
         mu: Array,
         alpha: float,
         z_samples: Optional[Array] = None,
+        T: int = 10000,
         rng: Optional[np.random.Generator] = None,
     ) -> float:
         """
@@ -387,9 +303,7 @@ class Loss:
         """
         muk = np.asarray(muk, dtype=float)
         Ck = np.asarray(Ck, dtype=float)
-        y = np.asarray(y, dtype=float)
         mu = np.asarray(mu, dtype=float).reshape(-1,1)
-        T = y.shape[0]
         (p,p) =Ck.shape
         if mu.shape[0] != p:
             raise ValueError("mu must have shape (p,)")
@@ -402,64 +316,8 @@ class Loss:
             if z_samples.shape[0] != T:
                 raise ValueError("z_samples must have length T")
         u = mu.T@muk + np.sqrt(mu.T @ Ck @ mu + float(alpha)**2) * z_samples
+        y = np.full_like(u, y)
         return float(np.mean(self.value(u, y)))
-
-
-    def estimate_r_moments_under_model(
-        self,
-        model: object,
-        *,
-        mu: Array,
-        alpha: float,
-        kappa: float,
-        class_index: Optional[int] = None,
-        T: int = 10000,
-        rng: Optional[np.random.Generator] = None,
-    ) -> Dict[str, Array]:
-        """
-        Convenience wrapper: sample (X,y) from a model and estimate
-        E[r^2], E[r x], E[r z].
-
-        The model is expected to implement:
-          - sample(n, rng=...) -> (X,y)
-          - and optionally sample_class(k, n, rng=...) -> (X,y)
-        """
-        rng = np.random.default_rng() if rng is None else rng
-        T = int(T)
-        if class_index is None:
-            X, y = model.sample(T, rng=rng)
-        else:
-            X, y = model.sample_class(int(class_index), T, rng=rng)
-        z_samples = rng.standard_normal(size=T)
-        return self.estimate_r_moments(
-            X=X, y=y, mu=mu, alpha=alpha, kappa=kappa, z_samples=z_samples, rng=rng
-        )
-
-    def estimate_expected_loss_under_model(
-        self,
-        model: object,
-        *,
-        mu: Array,
-        alpha: float,
-        class_index: Optional[int] = None,
-        T: int = 10000,
-        rng: Optional[np.random.Generator] = None,
-    ) -> float:
-        """
-        Convenience wrapper: sample (X,y) from a model and estimate
-        E[L_y(mu^T x + alpha z)].
-        """
-        rng = np.random.default_rng() if rng is None else rng
-        T = int(T)
-        if class_index is None:
-            X, y = model.sample(T, rng=rng)
-        else:
-            X, y = model.sample_class(int(class_index), T, rng=rng)
-        z_samples = rng.standard_normal(size=T)
-        return self.estimate_expected_loss(
-            X=X, y=y, mu=mu, alpha=alpha, z_samples=z_samples, rng=rng
-        )
-
 
 @dataclass
 class SquaredLoss(Loss):
@@ -632,66 +490,6 @@ class MixedSquaredLogCoshLoss(Loss):
         return 1.0 - self.prox_prime(z, float(kappa), y, prox_w=prox_w)
 
 
-
-# @dataclass
-# class LogisticLoss(Loss):
-#     """
-#     Binary logistic loss with labels y ∈ {+1, -1}:
-
-#       L_y(z) = log(1 + exp(-y z))
-
-#     Prox is computed by Newton iterations.
-#     """
-#     max_iter: int = 60
-#     tol: float = 1e-10
-
-#     def value(self, z: Array, y: Array) -> Array:
-#         z = np.asarray(z, dtype=float)
-#         y = np.asarray(y, dtype=float)
-#         t = y * z
-#         # log(1+exp(-t)) in a stable way:
-#         # Use softplus: log(1+exp(u)) = logaddexp(0,u)
-#         return np.logaddexp(0.0, -t)
-
-#     def grad(self, z: Array, y: Array) -> Array:
-#         z = np.asarray(z, dtype=float)
-#         y = np.asarray(y, dtype=float)
-#         t = y * z
-#         # d/dz log(1+exp(-t)) = -y * sigmoid(-t)
-#         return -y * expit(-t)
-
-#     def prox(self, z: Array, kappa: float, y: Array) -> Array:
-#         """
-#         Compute prox_{kappa * logistic_y}(z) elementwise using Newton.
-
-#         Solve for w:
-#           0 = (w - z) - kappa * y / (1 + exp(y w))
-#         """
-#         print(f'kappa: {kappa}')
-#         z = np.asarray(z, dtype=float)
-#         y = np.asarray(y, dtype=float)
-#         k = float(kappa)
-
-#         # Initial guess: w0 = z
-#         w = z.copy()
-
-#         # Vectorized Newton iterations
-#         for _ in range(self.max_iter):
-#             t = y * w
-#             sig_t = expit(t)          # sigmoid(t)
-#             h = expit(-t)             # 1/(1+exp(t))
-#             g = (w - z) - k * y * h
-#             gprime = 1.0 + k * sig_t * (1.0 - sig_t)
-
-#             step = g / gprime
-#             w_new = w - step
-
-#             if np.max(np.abs(w_new - w)) < self.tol:
-#                 w = w_new
-#                 break
-#             w = w_new
-
-#         return w
 @dataclass
 class LogisticLoss(Loss):
     """
@@ -958,9 +756,6 @@ class EpsScaledLoss(Loss):
     def value(self, z: Array, u: Array) -> Array:
         z = np.asarray(z, dtype=float)
         eps, y = self._split_u(u)
-        # print(f'ushape:{u.shape}')
-        # print(f'zshape:{z.shape}')
-        # print(f'yshape:{y.shape}')
         return eps * self.base_loss.value(z, y)
 
     def grad(self, z: Array, u: Array) -> Array:

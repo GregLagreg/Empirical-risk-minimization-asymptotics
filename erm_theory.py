@@ -185,6 +185,7 @@ class ERMTrainer:
         mean_theta = np.mean(self.thetas, axis=0)
         cov_theta = np.cov(self.thetas, rowvar=False, bias=False)
         return dict(
+            thetas = self.thetas,
             mean_theta=mean_theta,
             cov_theta=cov_theta,
             gen_losses=losses,
@@ -410,7 +411,7 @@ class TheoryFixedPointSolver:
         pred_loss_gauss_score = 0.0
         for k in range(K):
             pred_loss += self.gamma[k] * self._expected_loss_for_class(k, mu=mu, alpha_k=alpha[k])
-            pred_loss_gauss_score += self.gamma[k] * self._expected_loss_for_class_gaussian_score(k, mu=mu, alpha_k=alpha[k])
+            # pred_loss_gauss_score += self.gamma[k] * self._expected_loss_for_class_gaussian_score(k, mu=mu, alpha_k=alpha[k])
 
         return dict(
             mu=mu,
@@ -420,7 +421,7 @@ class TheoryFixedPointSolver:
             Q=Q,
             A = trace_terms,
             predicted_loss=float(pred_loss),
-            pred_loss_gauss_score = float(pred_loss_gauss_score),
+            # pred_loss_gauss_score = float(pred_loss_gauss_score),
             converged=converged,
             num_iter=it + 1,
             damping_final = d_it,
