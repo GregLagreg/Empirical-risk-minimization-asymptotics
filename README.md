@@ -13,4 +13,4 @@ It accompanies our submission to **ICML 2026**, enabling the reproduction of exp
     A tutorial providing explanations on how to use the various classes and Python scripts included in this package.
 
 *   **`Notebook3_universality_through_elastic_loss.ipynb`**
-    Visualizes the loss of performance optimality when transitioning from ERM with $L_2$ loss to ERM with $L_1$ loss.
+    Visualizes the performance universality breakdown when transitioning from ERM with $L_2$ loss to ERM with $L_1$ loss.
