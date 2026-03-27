@@ -37,13 +37,13 @@ To make navigation easy, we answer in the order of your questions and use the sa
 
    A concrete use case is high-dimensional classification or regression on structured non-Gaussian features, for example mixture models, random-feature-type maps, or real embeddings such as MNIST features, where Gaussian asymptotics are often used to tune regularization or predict test error. Our result tells us when that shortcut is reliable and when it is not.
 
-   In simple terms, Theorem 4.3 says that the random ERM can be summarized by two deterministic quantities: a mean proxy $\mu_*$, asymptotically equal to $\mu_{\hat\theta} = \mathbb E[\hat\theta]$, and a fluctuation size $\alpha_*$, asymptotically given by $\alpha_*^2 \approx \mathrm{tr}(C_x C_{\hat\theta})$. These two quantities are obtained from an explicit min-max problem, or equivalently from the fixed-point system in Theorem 4.4.
+   In simple terms, Theorem 4.3 says that the random ERM can be summarized by two deterministic quantities: a mean proxy \(\mu_*\), asymptotically equal to \(\mu_{\hat\theta} = \mathbb E[\hat\theta]\), and a fluctuation size \(\alpha_*\), asymptotically given by \(\alpha_*^2 \approx \mathrm{tr}(C_x C_{\hat\theta})\). These two quantities are obtained from an explicit min-max problem, or equivalently from the fixed-point system in Theorem 4.4.
 
    Under Assumption 4, Section 6 then shows that the test score behaves like
-   $$
+   \[
    x^\top \hat\theta \;\approx\; x^\top \mu_* + \alpha_* z,
-   $$
-   with $z \sim \mathcal N(0,1)$ independent of $(x,y)$. Hence score Gaussianity holds if and only if the informative projection $x^\top \mu_*$ is Gaussian.
+   \]
+   with \(z \sim \mathcal N(0,1)\) independent of \((x,y)\). Hence score Gaussianity holds if and only if the informative projection \(x^\top \mu_*\) is Gaussian.
 
    This matters in practice because a Gaussian proxy can miss skewness or bimodality of the score and therefore misestimate classification error. Our synthetic mixture and MNIST experiments illustrate this. At the same time, performance universality can still survive score non-universality when the metric depends only on low-order score moments rather than on the full score law; the ridge / squared-loss linear-model corollary is the clean example of this mechanism.
 
@@ -51,18 +51,17 @@ To make navigation easy, we answer in the order of your questions and use the sa
 
    **Shared response B: Assumption 3**
 
-   Assumption 3 does not require separability. It is a regularity condition on the third derivatives of $\rho$: it says that cross-coordinate third-order interactions are small enough at the $p=\Theta(n)$ fluctuation scale relevant to $\hat\theta - \mu_{\hat\theta}$. This is exactly the scale at which the quadratic surrogate is used, and it explains why only trace-level second-order quantities remain in the final formulas.
+   Assumption 3 does not require separability. It is a regularity condition on the third derivatives of \(\rho\): it says that cross-coordinate third-order interactions are small enough at the \(p=\Theta(n)\) fluctuation scale relevant to \(\hat\theta - \mu_{\hat\theta}\). This is exactly the scale at which the quadratic surrogate is used, and it explains why only trace-level second-order quantities remain in the final formulas.
 
-   The assumption is automatic for all quadratic regularizers, including anisotropic ridge, since $\nabla^3 \rho \equiv 0$, and for separable smooth penalties, since the off-diagonal part of the third-derivative tensor is zero. It also allows genuinely non-separable examples such as
-   $$
+   The assumption is automatic for all quadratic regularizers, including anisotropic ridge, since \(\nabla^3 \rho \equiv 0\), and for separable smooth penalties, since the off-diagonal part of the third-derivative tensor is zero. It also allows genuinely non-separable examples such as
+   \[
    \rho(\theta) = \frac12\,\theta^\top H \theta + \lambda\,\phi\!\left(p^{-1/2} u^\top \theta\right),
-   $$
-   with $H \succeq \kappa I$, $\phi \in C^3$ with bounded third derivative, and $\|u\| = O(1)$. Here the extra third-order coupling is low-rank and satisfies the assumption.
+   \]
+   with \(H \succeq \kappa I\), \(\phi \in C^3\) with bounded third derivative, and \(\|u\| = O(1)\). Here the extra third-order coupling is low-rank and satisfies the assumption.
 
    We will add such examples and clarify more explicitly why this is weaker than the standard weak-separability assumption: we control only the aggregate off-diagonal third-order effect, not a coordinate-wise decomposition.
 
-3. We will also fix the typo `EMR` $\to$ `ERM`.
-
+3. We will also fix the typo `EMR` \(\to\) `ERM`.
 
 
 
@@ -113,27 +112,27 @@ To make navigation easy, we use the same shared-response labels as in the other 
 
    A rigorous proof of Claim 4.1 would require a comparison theorem for the value and the optimizer of the non-Gaussian convex-concave saddle problem under the concentration and quadratic-growth conditions already isolated in the claim.
 
-   The main obstacle is that standard CGMT relies on exact Gaussian rotational invariance to replace the bilinear form $\theta^\top A w$ by an auxiliary Gaussian process. For concentrated non-Gaussian columns, one needs a universality theorem for both the value and the optimizer of the saddle problem, together with control of the data-dependent shift $\mu_{\hat\theta}$. This is why we stated 4.1 as a Claim rather than a theorem.
+   The main obstacle is that standard CGMT relies on exact Gaussian rotational invariance to replace the bilinear form \(\theta^\top A w\) by an auxiliary Gaussian process. For concentrated non-Gaussian columns, one needs a universality theorem for both the value and the optimizer of the saddle problem, together with control of the data-dependent shift \(\mu_{\hat\theta}\). This is why we stated 4.1 as a Claim rather than a theorem.
 
    We will revise the wording so that Theorems 4.3 and 4.4 are explicitly presented as consequences of Claim 4.1, making the location of the heuristic step fully transparent.
 
 2. **Assumption 3 and non-separable examples**
 
    Please see **Shared response B** in the rebuttals to Reviewers zqV1. In particular, we will add explicit non-separable examples such as
-   $$
+   \[
    \rho(\theta) = \frac12\,\theta^\top H \theta + \lambda\,\phi\!\left(p^{-1/2} u^\top \theta\right),
-   $$
+   \]
    and clarify why Assumption 3 is weaker than the usual weak-separability condition.
 
 3. **When performance universality can survive score breakdown**
 
-   A sufficient mechanism is that the target metric depends on the score only through low-order moments determined by $(\mu_*, \alpha_*)$, rather than through the full score law. The ridge / squared-loss linear-model corollary is the clean example of this phenomenon; please see **Shared response A** in the rebuttals to Reviewers zqV1 and zGDu.
+   A sufficient mechanism is that the target metric depends on the score only through low-order moments determined by \((\mu_*, \alpha_*)\), rather than through the full score law. The ridge / squared-loss linear-model corollary is the clean example of this phenomenon; please see **Shared response A** in the rebuttals to Reviewers zqV1 and zGDu.
 
    As a concrete empirical illustration, the anonymous repository includes a short notebook sweeping the elastic loss
-   $$
+   \[
    \mathcal L_\eta = (1-\eta)\ell_2 + \eta \ell_1
-   $$
-   on a bimodal model. At $\eta = 0$, squared loss shows performance universality even though the score is non-Gaussian; as $\eta$ increases toward the non-smooth $\ell_1$ regime, the Gaussian risk proxy degrades. We present this notebook only as an illustration of the boundary of the theory, not as a theorem beyond the smooth setting.
+   \]
+   on a bimodal model. At \(\eta = 0\), squared loss shows performance universality even though the score is non-Gaussian; as \(\eta\) increases toward the non-smooth \(\ell_1\) regime, the Gaussian risk proxy degrades. We present this notebook only as an illustration of the boundary of the theory, not as a theorem beyond the smooth setting.
 
 
 
@@ -207,13 +206,13 @@ Thank you for pinpointing the main technical issues. We answer in the order of y
    We agree that Assumption 4 should be presented explicitly as a conditional hypothesis, not as an established theorem in the current draft. Its role is limited: it is used only in Section 6 to turn the mean/covariance characterization into a full score law; the non-Gaussian min-max / fixed-point characterization in Section 4 does not rely on it.
 
    The heuristic comes from the linearized KKT relation
-   $$
+   \[
    H_\rho(\hat\theta - \mu_{\hat\theta})
    \;\approx\;
    -\,\nabla\rho(\mu_{\hat\theta})
    - \frac{1}{n}\sum_{i=1}^n \mathcal L'_{y_i}(x_i^\top \hat\theta)\,x_i.
-   $$
-   This suggests that $\hat\theta - \mu_{\hat\theta}$ behaves like an average of many weakly dependent terms. The difficulty is that the summands depend on $\hat\theta$ itself, so a standard CLT does not apply directly; one needs to control both the fluctuations of the optimizer and the dependence of the summands on that same optimizer.
+   \]
+   This suggests that \(\hat\theta - \mu_{\hat\theta}\) behaves like an average of many weakly dependent terms. The difficulty is that the summands depend on \(\hat\theta\) itself, so a standard CLT does not apply directly; one needs to control both the fluctuations of the optimizer and the dependence of the summands on that same optimizer.
 
    At present we do not claim a broad rigorous class where Assumption 4 is proved. Our point in the paper is to isolate it as the extra step needed for a full score law. We will revise the text to make this conditional status much more explicit.
 
@@ -223,7 +222,7 @@ Thank you for pinpointing the main technical issues. We answer in the order of y
 
    The limitation to smooth losses and smooth regularizers is broader than just the quadratic surrogate. Smoothness and strong convexity enter in three places:
 
-   1. concentration and uniqueness of $\hat\theta$;
+   1. concentration and uniqueness of \(\hat\theta\);
    2. the quadratic surrogate itself, via a second/third-order Taylor expansion;
    3. the linearized fluctuation heuristic behind Assumption 4.
 
@@ -328,7 +327,7 @@ To make navigation easy, we use the same shared-response labels as in the other 
 
 1. **Limitations and scope**
 
-   We agree that the paper should state more plainly that Assumption 1 is a concentration assumption. It covers, for example, features of the form $x=\Phi(z)$ with Gaussian latent $z$ and Lipschitz $\Phi$, as well as class-conditional Lipschitz maps in classification, but it does not cover heavy-tailed or non-concentrated designs. We will add this explicitly.
+   We agree that the paper should state more plainly that Assumption 1 is a concentration assumption. It covers, for example, features of the form \(x=\Phi(z)\) with Gaussian latent \(z\) and Lipschitz \(\Phi\), as well as class-conditional Lipschitz maps in classification, but it does not cover heavy-tailed or non-concentrated designs. We will add this explicitly.
 
    On Claim 4.1 and Assumptions 3/4, please see **Shared response C**, **Shared response B**, and **Shared response D** in the other rebuttals.
 
@@ -336,8 +335,8 @@ To make navigation easy, we use the same shared-response labels as in the other 
 
    Please see **Shared response A** in the rebuttals to Reviewers zqV1. We will also add two clarifications that would have helped the current draft:
 
-   - In the Gaussian case, or more generally whenever $x^\top \mu_*$ is Gaussian, our score description reduces to the usual Gaussian fixed-point picture.
-   - Beyond classical Gaussian design, Assumption 1 covers concentrated non-Gaussian representations such as Lipschitz feature maps of Gaussian latents. Our bimodal synthetic example and the MNIST experiment are concrete cases where the same $(\mu_*, \alpha_*)$ description remains predictive while the score itself is non-Gaussian.
+   - In the Gaussian case, or more generally whenever \(x^\top \mu_*\) is Gaussian, our score description reduces to the usual Gaussian fixed-point picture.
+   - Beyond classical Gaussian design, Assumption 1 covers concentrated non-Gaussian representations such as Lipschitz feature maps of Gaussian latents. Our bimodal synthetic example and the MNIST experiment are concrete cases where the same \((\mu_*, \alpha_*)\) description remains predictive while the score itself is non-Gaussian.
 
    The anonymous repository linked in the paper reproduces these experiments and includes additional notebooks; we will point readers to it more clearly.
 
@@ -345,8 +344,6 @@ To make navigation easy, we use the same shared-response labels as in the other 
 
    We agree that the related-work section should be strengthened. We will explicitly acknowledge Goldt et al. (2022) together with Hu & Lu (2022) when discussing score universality / one-dimensional CLTs and their implications for performance universality, and clarify the chronology relative to Montanari & Saeed (2022). We will also expand the discussion around Loureiro et al. (2021b), Gerace et al. (2022), mixture-model work, and the more recent random-feature / cGET-related papers you listed.
 
-   Regarding cGET, we agree that the connection is close in spirit. A useful way to state it is that cGET isolates cases where the non-Gaussian part of the problem lives in a low-dimensional informative component; our Section 6/7 viewpoint expresses a very similar phenomenon through the effective signal proxy $\mu_*$ and the informative subspace $F+\mathrm{span}(a)$. We will make this comparison explicit and clarify both the overlap and the difference in viewpoint.
+   Regarding cGET, we agree that the connection is close in spirit. A useful way to state it is that cGET isolates cases where the non-Gaussian part of the problem lives in a low-dimensional informative component; our Section 6/7 viewpoint expresses a very similar phenomenon through the effective signal proxy \(\mu_*\) and the informative subspace \(F+\mathrm{span}(a)\). We will make this comparison explicit and clarify both the overlap and the difference in viewpoint.
 
 4. We appreciate the references and will incorporate them.
-
-
