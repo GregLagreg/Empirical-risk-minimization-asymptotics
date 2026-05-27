@@ -43,7 +43,7 @@ class DataAugmTrainer:
     loss: Loss
     regularizer: Regularizer
     transform: function # La transformation aléatoire
-    K_augm: int = 10
+    K_augm: int = 40
 
     def solve_theta_hat(
         self,
